@@ -16,6 +16,22 @@
 ## Hooks
 
 - Custom hooks named `use*`, one per file, kebab-case filename.
+- General-purpose hooks (`useDebounce`, `useResizeObserver`, `useMediaQuery`,
+  `useControllableState`…) are never added as a dependency, not even a good
+  one. Compare implementations across libraries per hook (latest callback
+  without resubscribing, no needless re-renders, cleanup, React 19 /
+  Compiler-safe) and copy the best one:
+  - `vendir.yml` pins the upstream file; `vendir sync` writes the untouched
+    original to `vendor/upstream/` (outside `src`, excluded from tsc/Biome);
+  - the working copy lives in `src/shared/hooks/vendor/` and differs from
+    the original only in imports; a copy with a behaviour fix moves to
+    `src/shared/hooks/` and the deviation is recorded;
+  - upstream update: `vendir sync`, then
+    `git merge-file <working copy> <upstream before> <upstream after>`,
+    resolve conflicts, run the hook tests;
+  - no implementation fits → own hook with a test (React 19 `useEffectEvent`
+    for the latest callback).
+- Features import hooks only from `@/shared/hooks`.
 
 ## Styling
 
