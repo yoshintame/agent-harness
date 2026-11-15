@@ -1,21 +1,21 @@
 #!/usr/bin/env bun
 import { defineCommand } from 'citty@0.2.2'
-import { sortBy, take } from 'es-toolkit@1.52.0'
+import { sortBy, take, trim } from 'es-toolkit@1.52.0'
 import { z } from 'zod@4.6.5'
-import { jsonArg, limitArg, parseCount, printBlock, printJson, requestJson, runCli, stripHtml } from './lib'
+import { emit, jsonArg, limitArg, printBlock, printEntries, readLimit, requestJson, runCli, stripHtml, toAbsoluteUrl } from './lib'
 
-const hostsByAlias = {
-  rust: 'users.rust-lang.org',
-  pytorch: 'discuss.pytorch.org',
-  obsidian: 'forum.obsidian.md',
-  hass: 'community.home-assistant.io',
-  homeassistant: 'community.home-assistant.io',
-  swift: 'forums.swift.org',
-  elixir: 'elixirforum.com',
-  docker: 'forums.docker.com',
-  meta: 'meta.discourse.org',
-  leaflet: 'leafletjs.com',
-} as const satisfies Record<string, string>
+const hostsByAlias = new Map([
+  ['rust', 'users.rust-lang.org'],
+  ['pytorch', 'discuss.pytorch.org'],
+  ['obsidian', 'forum.obsidian.md'],
+  ['hass', 'community.home-assistant.io'],
+  ['homeassistant', 'community.home-assistant.io'],
+  ['swift', 'forums.swift.org'],
+  ['elixir', 'elixirforum.com'],
+  ['docker', 'forums.docker.com'],
+  ['meta', 'meta.discourse.org'],
+  ['leaflet', 'leafletjs.com'],
+])
 
 const requestHeaders = {
   'User-Agent': 'Mozilla/5.0 (research-cli; personal use)',
@@ -66,17 +66,19 @@ interface TopicSummary {
   last_posted_at: string | null
 }
 
+interface TopicPost {
+  username: string | null
+  post_number: number
+  score: number | null
+  created_at: string | null
+  body: string
+}
+
 interface Topic {
   title: string
   url: string
   posts_count: number | null
-  posts: Array<{
-    username: string | null
-    post_number: number
-    score: number | null
-    created_at: string | null
-    body: string
-  }>
+  posts: TopicPost[]
 }
 
 const latest = defineCommand({
@@ -87,9 +89,8 @@ const latest = defineCommand({
     json: jsonArg,
   },
   async run({ args }) {
-    const topics = await listLatestTopics(args.instance, parseCount({ flag: 'limit', value: args.limit }))
-    if (args.json) return printJson(topics)
-    printTopicSummaries(topics)
+    const topics = await listLatestTopics({ instance: args.instance, limit: readLimit(args.limit) })
+    emit({ value: topics, json: args.json, printMarkdown: printTopicSummaries })
   },
 })
 
@@ -97,20 +98,19 @@ const fetchCommand = defineCommand({
   meta: { name: 'fetch', description: 'Fetch a topic thread with its posts' },
   args: {
     url: { type: 'positional', required: true, description: 'Topic URL, e.g. https://users.rust-lang.org/t/slug/12345' },
-    limit: { type: 'string', default: '20', description: 'Max posts to return from the thread' },
+    limit: limitArg(20, 'Max posts to return from the thread'),
     json: jsonArg,
   },
   async run({ args }) {
-    const topic = await fetchTopic(args.url, parseCount({ flag: 'limit', value: args.limit }))
-    if (args.json) return printJson(topic)
-    printTopic(topic)
+    const topic = await fetchTopic({ url: args.url, maxPosts: readLimit(args.limit) })
+    emit({ value: topic, json: args.json, printMarkdown: printTopic })
   },
 })
 
 const instances = defineCommand({
   meta: { name: 'instances', description: 'List known instance aliases' },
   run() {
-    for (const [alias, host] of sortBy(Object.entries(hostsByAlias), [([alias]) => alias])) {
+    for (const [alias, host] of sortBy([...hostsByAlias], [([alias]) => alias])) {
       console.log(`${alias.padEnd(16)} ${host}`)
     }
   },
@@ -125,9 +125,14 @@ const main = defineCommand({
   subCommands: { latest, fetch: fetchCommand, instances },
 })
 
-async function listLatestTopics(instance: string, limit: number): Promise<TopicSummary[]> {
+interface ListLatestTopicsInput {
+  instance: string
+  limit: number
+}
+
+async function listLatestTopics({ instance, limit }: ListLatestTopicsInput): Promise<TopicSummary[]> {
   const host = resolveHost(instance)
-  const response = await requestJson({ url: `https://${host}/latest.json`, headers: requestHeaders }, LatestResponse)
+  const response = await requestJson({ url: `https://${host}/latest.json`, headers: requestHeaders, schema: LatestResponse })
 
   return take(response.topic_list.topics, limit).map((topic) => ({
     title: topic.title,
@@ -140,15 +145,20 @@ async function listLatestTopics(instance: string, limit: number): Promise<TopicS
   }))
 }
 
-async function fetchTopic(url: string, maxPosts: number): Promise<Topic> {
-  const parsed = new URL(url.includes('://') ? url : `https://${url}`)
-  const topicId = parsed.pathname.match(/\/t\/(?:[^/]+\/)?(\d+)/)?.[1]
+interface FetchTopicInput {
+  url: string
+  maxPosts: number
+}
+
+async function fetchTopic({ url, maxPosts }: FetchTopicInput): Promise<Topic> {
+  const topicUrl = toAbsoluteUrl(url)
+  const topicId = topicUrl.pathname.match(/\/t\/(?:[^/]+\/)?(\d+)/)?.[1]
   if (topicId === undefined) throw new Error(`Cannot parse a Discourse topic URL: ${url}`)
 
-  const response = await requestJson({ url: `https://${parsed.host}/t/${topicId}.json`, headers: requestHeaders }, TopicResponse)
+  const response = await requestJson({ url: `https://${topicUrl.host}/t/${topicId}.json`, headers: requestHeaders, schema: TopicResponse })
   return {
     title: response.title,
-    url: `https://${parsed.host}/t/${response.slug}/${topicId}`,
+    url: `https://${topicUrl.host}/t/${response.slug}/${topicId}`,
     posts_count: response.posts_count ?? null,
     posts: take(response.post_stream.posts, maxPosts).map((post) => ({
       username: post.username ?? null,
@@ -162,17 +172,15 @@ async function fetchTopic(url: string, maxPosts: number): Promise<Topic> {
 
 function resolveHost(instance: string): string {
   const name = instance.trim()
-  return Object.hasOwn(hostsByAlias, name)
-    ? hostsByAlias[name as keyof typeof hostsByAlias]
-    : name.replace(/^https?:\/\//, '').replace(/^\/+|\/+$/g, '')
+  return hostsByAlias.get(name) ?? trim(name.replace(/^https?:\/\//, ''), '/')
 }
 
 function printTopicSummaries(topics: TopicSummary[]): void {
-  if (topics.length === 0) return console.log('No topics.')
-
-  for (const topic of topics) {
-    printBlock([`[${topic.posts_count ?? '?'} posts | ${topic.views ?? '?'} views] ${topic.title}`, `  ${topic.url}`])
-  }
+  printEntries({
+    entries: topics,
+    emptyMessage: 'No topics.',
+    toBlock: (topic) => [`[${topic.posts_count ?? '?'} posts | ${topic.views ?? '?'} views] ${topic.title}`, `  ${topic.url}`],
+  })
 }
 
 function printTopic(topic: Topic): void {
