@@ -7,12 +7,12 @@
 **Товар.** Дискавери начинай с Reddit, а не только проверяй им кандидатов: треды рекомендаций — готовый лонг-лист, обзоры и витрины WebSearch добирает следом.
 
 ```bash
-bun --install=force <skill-dir>/scripts/search-reddit.ts search "<категория>" --sub BuyItForLife --limit 20             # канонический саб «что купить, чтобы служило»
-bun --install=force <skill-dir>/scripts/search-reddit.ts search "<категория>" --sub <саб категории> --limit 20          # r/headphones, r/NAS, r/MechanicalKeyboards…: рекомендации и опыт владельцев, скор — сигнал
-bun --install=force <skill-dir>/scripts/search-reddit.ts search "<модель>" --sub <город/страна> --sort new --time year  # наличие и опыт покупки на месте
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "<категория>" --sub BuyItForLife --limit 20             # канонический саб «что купить, чтобы служило»
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "<категория>" --sub <саб категории> --limit 20          # r/headphones, r/NAS, r/MechanicalKeyboards…: рекомендации и опыт владельцев, скор — сигнал
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "<модель>" --sub <город/страна> --sort new --time year  # наличие и опыт покупки на месте
 ```
 
-Запросы держи в 2 слова; длиннее — только вместе с `--sub`: поиск Reddit матчит и тело поста, и длинный запрос без сабреддита тонет в случайных совпадениях. Пустая выдача на длинном запросе — повод укоротить запрос, а не вывод об отсутствии. Найденный тред читай через `bun --install=force <skill-dir>/scripts/search-reddit.ts fetch <url>`, не WebFetch: вывод чище.
+Запросы держи в 2 слова; длиннее — только вместе с `--sub`: поиск Reddit матчит и тело поста, и длинный запрос без сабреддита тонет в случайных совпадениях. Пустая выдача на длинном запросе — повод укоротить запрос, а не вывод об отсутствии. Найденный тред читай через `bun --install=fallback <skill-dir>/scripts/search-reddit.ts fetch <url>`, не WebFetch: вывод чище.
 
 Два усилителя поверх скрипта: WebSearch с добавкой `reddit` («\<категория\> reddit») достаёт треды через индекс Google, который ранжирует Reddit лучше родного поиска; агрегаторы reddit-рекомендаций (Looria, redditfavorites) сводят упоминания по тредам в рейтинг за тебя — класс сервисов живёт, конкретные имена сменяются, живой ищи WebSearch'ем.
 

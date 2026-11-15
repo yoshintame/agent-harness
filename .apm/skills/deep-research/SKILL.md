@@ -31,7 +31,7 @@ __Сохранённая память — не источник: не читай
 
 Запрос к WebSearch: именная группа темы, год при чувствительности к свежести (текущий — из `# currentDate` системного контекста), уточнитель — локация, язык, аудитория. Итерируй, пока каждая новая выдача даёт новое.
 
-Скрипты `search-reddit`, `search-hn`, `search-github`, `search-discourse` лежат в `<skill-dir>/scripts/`, понимают `--help`, а выдачу отдают и в `--json`. Вызывай их как `bun --install=force <skill-dir>/scripts/<имя>.ts` и всегда с `dangerouslyDisableSandbox: true`: без `--install=force` Bun выключает автоустановку пакетов, если выше по дереву есть `node_modules`, а в песочнице закрыта сеть и `chrome-devtools` отказывается работать; команды, тактики и очерёдность — в файле корпуса: софт — `references/corpus-software.md`, товары и услуги — `references/corpus-market.md`. Там, где у ветки есть файл корпуса, скрипты обязательны: ощущение, что выдача WebSearch уже полна, — не основание их пропустить, потому что чего он не индексирует, того ты в нём и не увидишь. Без скриптов работают вопросы, у которых корпуса нет вовсе, — например когда взвешиваешь доказательства.
+Скрипты `search-reddit`, `search-hn`, `search-github`, `search-discourse` лежат в `<skill-dir>/scripts/`, понимают `--help`, а выдачу отдают и в `--json`. Вызывай их как `bun --install=fallback <skill-dir>/scripts/<имя>.ts` и всегда с `dangerouslyDisableSandbox: true`: без `--install=fallback` Bun выключает автоустановку пакетов, если выше по дереву есть `node_modules`, а `--install=force` ломается рядом с `package.json`, а в песочнице закрыта сеть и `chrome-devtools` отказывается работать; команды, тактики и очерёдность — в файле корпуса: софт — `references/corpus-software.md`, товары и услуги — `references/corpus-market.md`. Там, где у ветки есть файл корпуса, скрипты обязательны: ощущение, что выдача WebSearch уже полна, — не основание их пропустить, потому что чего он не индексирует, того ты в нём и не увидишь. Без скриптов работают вопросы, у которых корпуса нет вовсе, — например когда взвешиваешь доказательства.
 
 ## Гигиена запросов
 
@@ -67,9 +67,9 @@ __Сохранённая память — не источник: не читай
 
 ```bash
 # все вызовы — dangerouslyDisableSandbox: true
-bun --install=force <skill-dir>/scripts/search-reddit.ts search "test" --limit 1
-bun --install=force <skill-dir>/scripts/search-hn.ts search "test" --limit 1
-bun --install=force <skill-dir>/scripts/search-github.ts search "test" --limit 1
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "test" --limit 1
+bun --install=fallback <skill-dir>/scripts/search-hn.ts search "test" --limit 1
+bun --install=fallback <skill-dir>/scripts/search-github.ts search "test" --limit 1
 gh api rate_limit                  # сеть, TLS и живой токен разом
 ```
 
