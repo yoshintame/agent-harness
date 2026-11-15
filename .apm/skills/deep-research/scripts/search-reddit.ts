@@ -1,69 +1,61 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { defineCommand } from 'citty@0.2.2'
-import { orderBy, randomInt, retry, sample, take } from 'es-toolkit@1.52.0'
+import { orderBy, retry, take } from 'es-toolkit@1.52.0'
 import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 import {
+  ChromeUnavailableError,
+  closePage,
   describeError,
+  evaluateInPage,
   fail,
   HttpError,
   jsonArg,
   limitArg,
+  openPage,
   parseCount,
   printBlock,
   printJson,
-  type RequestInput,
   requestJson,
-  requestText,
   runCli,
-  stripHtml,
   toOneLine,
-  unescapeHtml,
 } from './lib'
 
-const clientId = 'ohXpoqrZYub1kg'
-const tokenUrl = 'https://www.reddit.com/api/v1/access_token'
-const oauthBase = 'https://oauth.reddit.com'
 const wwwBase = 'https://www.reddit.com'
 const arcticBase = 'https://arctic-shift.photon-reddit.com/api'
-const arcticUserAgent = 'search-reddit/1.1 (personal research CLI)'
+const arcticUserAgent = 'search-reddit/2.0 (personal research CLI)'
 const arcticTimeoutMs = 30_000
 const maxRetryWaitSeconds = 10
-const tokenExpiryMarginSeconds = 120
+const minRequestGapMs = 5500
+const maxScrolls = 12
+const scrollSettleMs = 1500
 const maxCommentDepth = 2
 const maxCommentsPerLevel = 10
-const tokenCachePath = join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'search-reddit', 'token.json')
-const deviceIdAlphabet = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789']
+const lastRequestPath = join(process.env.XDG_CACHE_HOME ?? join(homedir(), '.cache'), 'search-reddit', 'last-request')
 const booleanOperators = new Set(['AND', 'OR', 'NOT'])
 const daysByTimeRange = { hour: 1, day: 1, week: 7, month: 31, year: 366 } as const
 
 enum Stage {
-  OAuth = 'oauth',
-  Json = 'json',
-  Rss = 'rss',
+  Browser = 'browser',
   Arctic = 'arctic',
 }
 
-enum RefusalKind {
-  EdgeBlock = 'edge-block',
-  RateLimit = 'rate-limit',
-  Other = 'other',
+enum PageRefusal {
+  Blocked = 'blocked',
+  Challenge = 'challenge',
+  Unexpected = 'unexpected',
 }
 
 const searchNotes = {
-  [Stage.OAuth]: 'Reddit API',
-  [Stage.Json]: 'anonymous .json endpoint',
-  [Stage.Rss]: 'RSS feed, no scores or comment counts',
+  [Stage.Browser]: 'Reddit via the chrome-cdp Chrome session',
   [Stage.Arctic]: 'Arctic Shift archive: title-only match, newest first regardless of --sort, scores are archive snapshots',
 } as const satisfies Record<Stage, string>
 
 const fetchNotes = {
-  [Stage.OAuth]: 'Reddit API',
-  [Stage.Json]: 'anonymous .json endpoint',
-  [Stage.Rss]: 'RSS feed, no scores, comments flattened',
+  [Stage.Browser]: 'Reddit via the chrome-cdp Chrome session',
   [Stage.Arctic]: 'Arctic Shift archive, scores are archive snapshots',
 } as const satisfies Record<Stage, string>
 
@@ -81,7 +73,6 @@ const Post = z.object({
 })
 type Post = z.infer<typeof Post>
 
-const PostListing = z.object({ data: z.object({ children: z.array(z.object({ data: Post })) }) })
 const ThreadResponse = z.tuple([
   z.object({ data: z.object({ children: z.array(z.object({ data: Post })).min(1) }) }),
   z.object({ data: z.object({ children: z.array(z.unknown()) }) }),
@@ -99,8 +90,30 @@ const CommentThing = z.object({
 type CommentThing = z.infer<typeof CommentThing>
 
 const RepliesListing = z.object({ data: z.object({ children: z.array(z.unknown()) }) })
-const TokenResponse = z.object({ access_token: z.string(), expires_in: z.number().optional() })
-const TokenCache = z.object({ access_token: z.string(), expires_at: z.number() })
+
+const RefusedPage = z.object({ kind: z.literal('refused'), title: z.string(), text: z.string() })
+
+const SearchPage = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('results'),
+    units: z.array(
+      z.object({
+        title: z.string(),
+        subreddit: z.string().nullish(),
+        author: z.string().nullish(),
+        permalink: z.string(),
+        created: z.string().nullish(),
+        votes: z.number().nullish(),
+        comments: z.number().nullish(),
+        snippet: z.string().nullish(),
+      }),
+    ),
+  }),
+  RefusedPage,
+])
+type SearchUnit = Extract<z.infer<typeof SearchPage>, { kind: 'results' }>['units'][number]
+
+const JsonPage = z.discriminatedUnion('kind', [z.object({ kind: z.literal('json'), body: z.string() }), RefusedPage])
 
 interface PostSummary {
   title: string
@@ -131,13 +144,6 @@ interface Thread {
   top_comments: Comment[]
 }
 
-interface Refusal {
-  kind: RefusalKind
-  status: number
-  retryAfterSeconds: number | null
-  detail: string
-}
-
 interface StageFailure {
   stage: Stage
   reason: string
@@ -149,6 +155,7 @@ interface StageAttempt<T> {
 }
 
 type StageOutcome<T> = { ok: true; value: T; stage: Stage; failures: StageFailure[] } | { ok: false; failures: StageFailure[] }
+type StageSuccess<T> = Extract<StageOutcome<T>, { ok: true }>
 
 interface SearchQuery {
   query: string
@@ -159,9 +166,12 @@ interface SearchQuery {
   strict: boolean
 }
 
-class TokenRequestError extends Error {
-  public constructor(public override readonly cause: unknown) {
-    super('token request failed')
+class RedditPageError extends Error {
+  public constructor(
+    public readonly refusal: PageRefusal,
+    detail: string,
+  ) {
+    super(detail)
   }
 }
 
@@ -175,8 +185,6 @@ class ChannelFailure extends Error {
   }
 }
 
-const session = { token: null as string | null, userAgent: androidUserAgent() }
-
 const search = defineCommand({
   meta: { name: 'search', description: 'Search Reddit posts' },
   args: {
@@ -185,7 +193,7 @@ const search = defineCommand({
     sort: { type: 'enum', options: ['relevance', 'top', 'new', 'comments', 'hot'], default: 'relevance', description: 'Sort order' },
     time: { type: 'enum', options: ['hour', 'day', 'week', 'month', 'year', 'all'], default: 'all', description: 'Time range' },
     limit: limitArg(20),
-    loose: { type: 'boolean', description: "Skip auto '+word' AND-wrapping; pass raw query to Reddit" },
+    loose: { type: 'boolean', description: "Skip auto '+word' AND-wrapping; pass the raw query to Reddit" },
     json: jsonArg,
   },
   async run({ args }) {
@@ -245,30 +253,25 @@ const arcticCommand = defineCommand({
 const main = defineCommand({
   meta: {
     name: 'search-reddit',
-    description: 'Reddit search and fetch with no app registration; falls back to RSS and the Arctic Shift archive and names every failed stage',
+    description: 'Reddit search and thread fetch through the signed-in chrome-cdp Chrome, with the Arctic Shift archive as fallback',
   },
   subCommands: { search, fetch: fetchCommand, arctic: arcticCommand },
 })
 
-async function searchPosts(query: SearchQuery): Promise<Extract<StageOutcome<PostSummary[]>, { ok: true }>> {
-  const attempts: Array<StageAttempt<PostSummary[]>> = [
-    { stage: Stage.OAuth, run: () => searchViaOAuth(query) },
-    { stage: Stage.Json, run: () => searchViaJson(query) },
-    { stage: Stage.Rss, run: () => searchViaRss(query) },
+async function searchPosts(query: SearchQuery): Promise<StageSuccess<PostSummary[]>> {
+  const outcome = await runStages<PostSummary[]>([
+    { stage: Stage.Browser, run: () => searchViaBrowser(query) },
     ...(query.sub ? [{ stage: Stage.Arctic, run: () => searchViaArctic(query) }] : []),
-  ]
-  const outcome = await runStages(attempts)
+  ])
   if (!outcome.ok) throw new ChannelFailure('search', outcome.failures, query.sub ? undefined : noArchiveHint)
   return outcome
 }
 
-async function fetchThread(url: string): Promise<Extract<StageOutcome<Thread>, { ok: true }>> {
-  const { path, postId } = threadPath(url)
+async function fetchThread(url: string): Promise<StageSuccess<Thread>> {
+  const postId = threadPostId(url)
   const outcome = await runStages<Thread>([
-    { stage: Stage.OAuth, run: () => fetchViaOAuth(path) },
-    { stage: Stage.Json, run: () => fetchViaJson(path) },
-    { stage: Stage.Arctic, run: () => fetchViaArctic(path, postId) },
-    { stage: Stage.Rss, run: () => fetchViaRss(path) },
+    { stage: Stage.Browser, run: () => fetchViaBrowser(postId) },
+    { stage: Stage.Arctic, run: () => fetchViaArctic(postId) },
   ])
   if (!outcome.ok) throw new ChannelFailure('fetch', outcome.failures)
   return outcome
@@ -301,28 +304,132 @@ function reportFallback({ stage, failures }: ReportFallbackInput, notes: Record<
   )
 }
 
-async function searchViaOAuth(query: SearchQuery): Promise<PostSummary[]> {
-  const listing = await getOAuthJson(`${oauthBase}${searchPath(query, '')}&raw_json=1`, PostListing)
-  return listing.data.children.map(({ data }) => toPostSummary(data))
+async function searchViaBrowser(query: SearchQuery): Promise<PostSummary[]> {
+  const page = await withRedditPage(browserSearchUrl(query), (pageId) => evaluateInPage(pageId, searchPageScript(query.limit), SearchPage))
+  if (page.kind === 'refused') throw toPageError(page)
+  return page.units.map(toSearchSummary)
 }
 
-async function searchViaJson(query: SearchQuery): Promise<PostSummary[]> {
-  const listing = await requestRedditJson({ url: `${wwwBase}${searchPath(query, '.json')}&raw_json=1`, headers: { 'User-Agent': androidUserAgent() } }, PostListing)
-  return listing.data.children.map(({ data }) => toPostSummary(data))
+async function fetchViaBrowser(postId: string): Promise<Thread> {
+  const url = `${wwwBase}/comments/${postId}/.json?limit=100&sort=top&raw_json=1`
+  const page = await withRedditPage(url, (pageId) => evaluateInPage(pageId, jsonPageScript, JsonPage))
+  if (page.kind === 'refused') throw toPageError(page)
+
+  const [post, comments] = ThreadResponse.parse(JSON.parse(page.body))
+  return toThread(post.data.children[0].data, extractComments({ items: comments.data.children, depth: 0, byScore: false }), postId)
 }
 
-async function searchViaRss(query: SearchQuery): Promise<PostSummary[]> {
-  const entries = await getAtomEntries(`${wwwBase}${searchPath(query, '.rss')}`)
-  return entries.map((entry) => ({
-    title: entry.title,
-    subreddit: entry.category,
-    score: null,
-    num_comments: null,
-    created_utc: 0,
-    url: entry.link,
-    selftext: entry.content.slice(0, 300),
-    author: entry.author,
-  }))
+async function withRedditPage<T>(url: string, read: (pageId: number) => Promise<T>): Promise<T> {
+  await waitForRequestSlot()
+  const pageId = await openPage(url)
+
+  try {
+    return await read(pageId)
+  } finally {
+    await closePage(pageId)
+  }
+}
+
+async function waitForRequestSlot(): Promise<void> {
+  const waitMs = readLastRequestAt() + minRequestGapMs - Date.now()
+  if (waitMs > 0) await Bun.sleep(waitMs)
+
+  try {
+    mkdirSync(dirname(lastRequestPath), { recursive: true })
+    writeFileSync(lastRequestPath, String(Date.now()))
+  } catch {
+    return
+  }
+}
+
+function readLastRequestAt(): number {
+  try {
+    return Number(readFileSync(lastRequestPath, 'utf8')) || 0
+  } catch {
+    return 0
+  }
+}
+
+function browserSearchUrl({ query, sub, sort, timeRange, strict }: SearchQuery): string {
+  const params = new URLSearchParams({ q: strict ? toStrictAnd(query) : query, type: 'posts', sort, t: timeRange })
+  if (sub) params.set('restrict_sr', '1')
+  return sub ? `${wwwBase}/r/${normalizeSubreddit(sub)}/search/?${params}` : `${wwwBase}/search/?${params}`
+}
+
+function searchPageScript(limit: number): string {
+  return `async () => {
+    const limit = ${limit}
+    const units = () => [...document.querySelectorAll('[data-testid=search-post-unit]')]
+    const pageText = document.body.innerText
+    if (units().length === 0 && /blocked by network security|Prove your humanity/.test(document.title + ' ' + pageText)) {
+      return { kind: 'refused', title: document.title, text: pageText.slice(0, 300) }
+    }
+    let previous = -1
+    for (let i = 0; i < ${maxScrolls} && units().length < limit && units().length !== previous; i++) {
+      previous = units().length
+      window.scrollTo(0, document.body.scrollHeight)
+      await new Promise((resolve) => setTimeout(resolve, ${scrollSettleMs}))
+    }
+    return {
+      kind: 'results',
+      units: units().slice(0, limit).map((unit) => {
+        const tracker = unit.querySelector('[data-faceplate-tracking-context]')
+        let context = {}
+        try { context = JSON.parse(tracker?.getAttribute('data-faceplate-tracking-context') ?? '{}') } catch {}
+        const titleLink = unit.querySelector('a[data-testid=post-title]')
+        const snippetLink = [...unit.querySelectorAll('a[href*="/comments/"]')].find((link) => link !== titleLink && link.innerText.trim() !== '' && link.innerText.trim() !== titleLink?.innerText.trim())
+        const numbers = [...unit.querySelectorAll('faceplate-number')].map((node) => Number(node.getAttribute('number')))
+        return {
+          title: context.post?.title ?? titleLink?.innerText.trim() ?? '',
+          subreddit: context.subreddit?.name ?? null,
+          author: context.profile?.name ?? null,
+          permalink: titleLink?.getAttribute('href') ?? '',
+          created: unit.querySelector('faceplate-timeago')?.getAttribute('ts') ?? null,
+          votes: Number.isFinite(numbers[0]) ? numbers[0] : null,
+          comments: Number.isFinite(numbers[1]) ? numbers[1] : null,
+          snippet: snippetLink?.innerText.trim() ?? null,
+        }
+      }),
+    }
+  }`
+}
+
+const jsonPageScript = `() => {
+  const text = document.body.innerText
+  try {
+    JSON.parse(text)
+    return { kind: 'json', body: text }
+  } catch {
+    return { kind: 'refused', title: document.title, text: text.slice(0, 300) }
+  }
+}`
+
+function toPageError({ title, text }: z.infer<typeof RefusedPage>): RedditPageError {
+  const refusal = match(`${title} ${text}`)
+    .with(P.string.includes('blocked by network security'), () => PageRefusal.Blocked)
+    .with(P.string.includes('Prove your humanity'), () => PageRefusal.Challenge)
+    .otherwise(() => PageRefusal.Unexpected)
+
+  const detail = match(refusal)
+    .with(PageRefusal.Blocked, () => 'Reddit blocked the chrome-cdp Chrome ("blocked by network security"): sign in to Reddit in its window (`chrome-cdp up` opens it)')
+    .with(PageRefusal.Challenge, () => 'Reddit asks for a human check ("Prove your humanity"): pass it in the chrome-cdp Chrome window')
+    .with(PageRefusal.Unexpected, () => `unexpected page "${title}": ${toOneLine(text, 120)}`)
+    .exhaustive()
+
+  return new RedditPageError(refusal, detail)
+}
+
+function toSearchSummary(unit: SearchUnit): PostSummary {
+  return {
+    title: unit.title,
+    subreddit: unit.subreddit ?? '',
+    score: unit.votes ?? null,
+    num_comments: unit.comments ?? null,
+    created_utc: unit.created ? Math.floor(Date.parse(unit.created) / 1000) : 0,
+    url: wwwBase + unit.permalink,
+    selftext: (unit.snippet ?? '').slice(0, 300),
+    author: unit.author ?? '',
+  }
 }
 
 async function searchViaArctic({ query, sub, timeRange, limit }: SearchQuery): Promise<PostSummary[]> {
@@ -330,16 +437,6 @@ async function searchViaArctic({ query, sub, timeRange, limit }: SearchQuery): P
   if (!words) throw new Error('nothing left to match on titles after stripping Reddit syntax')
 
   return listArcticPosts({ subreddit: sub ?? '', title: words, after: sinceDate(timeRange), before: undefined, sort: 'desc', limit })
-}
-
-function searchPath({ query, sub, sort, timeRange, limit, strict }: SearchQuery, suffix: '' | '.json' | '.rss'): string {
-  const params = new URLSearchParams({ q: strict ? toStrictAnd(query) : query })
-  if (sub) params.set('restrict_sr', 'on')
-  params.set('sort', sort)
-  params.set('t', timeRange)
-  params.set('limit', String(limit))
-
-  return sub ? `/r/${normalizeSubreddit(sub)}/search${suffix}?${params}` : `/search${suffix}?${params}`
 }
 
 function toStrictAnd(query: string): string {
@@ -369,75 +466,31 @@ function normalizeSubreddit(sub: string): string {
   return sub.trim().replace(/^r\//i, '').replace(/^\/+|\/+$/g, '')
 }
 
-async function fetchViaOAuth(path: string): Promise<Thread> {
-  const [post, comments] = await getOAuthJson(`${oauthBase}${path}?raw_json=1&limit=100`, ThreadResponse)
-  return toThread(post.data.children[0].data, extractComments({ items: comments.data.children, depth: 0, byScore: false }))
-}
-
-async function fetchViaJson(path: string): Promise<Thread> {
-  const [post, comments] = await requestRedditJson(
-    { url: `${wwwBase}${path}.json?raw_json=1&limit=100`, headers: { 'User-Agent': androidUserAgent() } },
-    ThreadResponse,
-  )
-  return toThread(post.data.children[0].data, extractComments({ items: comments.data.children, depth: 0, byScore: false }))
-}
-
-async function fetchViaArctic(path: string, postId: string): Promise<Thread> {
+async function fetchViaArctic(postId: string): Promise<Thread> {
   const [post] = await getArcticData('posts/ids', { ids: postId }, z.array(Post))
   if (post === undefined) throw new Error(`post ${postId} is not in the archive`)
 
   const tree = await getArcticData('comments/tree', { link_id: postId, limit: '500' }, z.array(z.unknown()))
-  return toThread(post, extractComments({ items: tree, depth: 0, byScore: true }), path)
+  return toThread(post, extractComments({ items: tree, depth: 0, byScore: true }), postId)
 }
 
-async function fetchViaRss(path: string): Promise<Thread> {
-  const [post, ...replies] = await getAtomEntries(`${wwwBase}${path}/.rss?limit=25`)
-  if (post === undefined) throw new Error('empty RSS feed')
-
-  return {
-    title: post.title,
-    subreddit: post.category,
-    score: null,
-    num_comments: null,
-    url: post.link || `${wwwBase}${path}`,
-    author: post.author,
-    selftext: '',
-    top_comments: replies
-      .filter((entry) => entry.content !== '' && entry.content !== '[link] [comments]')
-      .map((entry) => ({ author: entry.author, score: null, body: entry.content, depth: 0 })),
-  }
-}
-
-function threadPath(url: string): { path: string; postId: string } {
+function threadPostId(url: string): string {
   const path = new URL(url.includes('://') ? url : `https://${url}`).pathname.replace(/\/+$/, '')
   const postId = (path.match(/\/comments\/([a-z0-9]+)/) ?? path.match(/^\/([a-z0-9]+)$/))?.[1]
   if (postId === undefined) fail(`search-reddit fetch: not a thread URL (no /comments/<id> or redd.it/<id>): ${url}`)
-  return { path, postId }
+  return postId
 }
 
-function toThread(post: Post, comments: Comment[], fallbackPath = ''): Thread {
+function toThread(post: Post, comments: Comment[], postId: string): Thread {
   return {
     title: post.title ?? null,
     subreddit: post.subreddit ?? null,
     score: post.score ?? null,
     num_comments: post.num_comments ?? null,
-    url: wwwBase + (post.permalink ?? fallbackPath),
+    url: wwwBase + (post.permalink ?? `/comments/${postId}/`),
     author: post.author ?? null,
     selftext: post.selftext ?? '',
     top_comments: comments,
-  }
-}
-
-function toPostSummary(post: Post): PostSummary {
-  return {
-    title: post.title ?? '',
-    subreddit: post.subreddit ?? '',
-    score: post.score ?? null,
-    num_comments: post.num_comments ?? null,
-    created_utc: post.created_utc ?? 0,
-    url: wwwBase + (post.permalink ?? ''),
-    selftext: (post.selftext ?? '').slice(0, 300),
-    author: post.author ?? '',
   }
 }
 
@@ -472,31 +525,6 @@ function toCommentWithReplies({ comment, depth, byScore }: ToCommentWithRepliesI
   return [{ author: comment.author ?? null, score: comment.score ?? null, body, depth }, ...nested]
 }
 
-interface AtomEntry {
-  title: string
-  link: string
-  category: string
-  author: string
-  content: string
-}
-
-async function getAtomEntries(url: string): Promise<AtomEntry[]> {
-  const xml = await retry(() => requestText({ url, headers: { 'User-Agent': androidUserAgent() } }), redditRetry)
-  if (!xml.includes('<feed')) throw new Error('non-Atom response')
-
-  return [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/g)].map(([, entry = '']) => ({
-    title: stripHtml(unescapeHtml(atomText(entry, 'title'))),
-    link: unescapeHtml(entry.match(/<link\b[^>]*\bhref="([^"]*)"/)?.[1] ?? ''),
-    category: unescapeHtml(entry.match(/<category\b[^>]*\bterm="([^"]*)"/)?.[1] ?? ''),
-    author: stripHtml(unescapeHtml(atomText(entry, 'name'))).replace('/u/', ''),
-    content: stripHtml(unescapeHtml(atomText(entry, 'content'))),
-  }))
-}
-
-function atomText(entry: string, tag: string): string {
-  return entry.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`))?.[1] ?? ''
-}
-
 interface ListArcticPostsInput {
   subreddit: string
   title: string | undefined
@@ -515,6 +543,19 @@ async function listArcticPosts({ subreddit, title, after, before, sort, limit }:
   return posts.map(toPostSummary)
 }
 
+function toPostSummary(post: Post): PostSummary {
+  return {
+    title: post.title ?? '',
+    subreddit: post.subreddit ?? '',
+    score: post.score ?? null,
+    num_comments: post.num_comments ?? null,
+    created_utc: post.created_utc ?? 0,
+    url: wwwBase + (post.permalink ?? ''),
+    selftext: (post.selftext ?? '').slice(0, 300),
+    author: post.author ?? '',
+  }
+}
+
 async function getArcticData<T>(path: string, params: Record<string, string>, schema: z.ZodType<T>): Promise<T> {
   const envelope = z.object({ data: schema.nullish(), error: z.string().nullish() })
   const payload = await retry(
@@ -523,12 +564,6 @@ async function getArcticData<T>(path: string, params: Record<string, string>, sc
   )
   if (payload.error) throw new Error(`Arctic Shift: ${payload.error}`)
   return payload.data ?? schema.parse([])
-}
-
-const redditRetry = {
-  retries: 1,
-  shouldRetry: (error: unknown) => rateLimitWaitSeconds(error) !== null,
-  delay: (_attempt: number, error: unknown) => ((rateLimitWaitSeconds(error) ?? 0) + 1) * 1000,
 }
 
 const arcticRetry = {
@@ -541,119 +576,27 @@ const arcticRetry = {
       .otherwise(() => false),
   delay: (attempt: number, error: unknown) => {
     const backoff = 2 * (attempt + 1)
-    const retryAfter = error instanceof HttpError ? classifyRefusal(error).retryAfterSeconds : null
+    const retryAfter = error instanceof HttpError ? retryAfterSeconds(error) : null
     return Math.min(Math.max(backoff, retryAfter ?? 0), maxRetryWaitSeconds) * 1000
   },
 }
 
-function rateLimitWaitSeconds(error: unknown): number | null {
-  return match(error)
-    .with(P.intersection(P.instanceOf(HttpError), { status: 429 }), (refused) =>
-      match(classifyRefusal(refused).retryAfterSeconds)
-        .with(P.number.lte(maxRetryWaitSeconds), (seconds) => seconds)
-        .otherwise(() => null),
-    )
-    .otherwise(() => null)
-}
-
-async function requestRedditJson<T>(input: RequestInput, schema: z.ZodType<T>): Promise<T> {
-  return retry(() => requestJson(input, schema), redditRetry)
-}
-
-async function getOAuthJson<T>(url: string, schema: z.ZodType<T>, allowTokenRefresh = true): Promise<T> {
-  const token = session.token ?? readCachedToken() ?? (await fetchToken())
-  session.token = token
-
-  try {
-    return await requestRedditJson({ url, headers: { Authorization: `Bearer ${token}`, 'User-Agent': session.userAgent } }, schema)
-  } catch (error) {
-    const canRefresh = allowTokenRefresh ? isStaleTokenRefusal(error) : false
-    if (!canRefresh) throw error
-
-    session.token = null
-    rmSync(tokenCachePath, { force: true })
-    return getOAuthJson(url, schema, false)
-  }
-}
-
-function isStaleTokenRefusal(error: unknown): boolean {
-  return match(error)
-    .with(P.intersection(P.instanceOf(HttpError), { status: P.union(401, 403) }), (refused) => classifyRefusal(refused).kind !== RefusalKind.EdgeBlock)
-    .otherwise(() => false)
-}
-
-async function fetchToken(): Promise<string> {
-  const body = new URLSearchParams({ grant_type: 'https://oauth.reddit.com/grants/installed_client', device_id: deviceId() }).toString()
-  const response = await requestRedditJson(
-    {
-      url: tokenUrl,
-      method: 'POST',
-      body,
-      headers: { Authorization: `Basic ${btoa(`${clientId}:`)}`, 'User-Agent': androidUserAgent(), 'Content-Type': 'application/x-www-form-urlencoded' },
-    },
-    TokenResponse,
-  ).catch((error: unknown) => {
-    throw new TokenRequestError(error)
-  })
-
-  writeCachedToken(response.access_token, Date.now() / 1000 + (response.expires_in ?? 86_400))
-  return response.access_token
-}
-
-function readCachedToken(): string | null {
-  try {
-    const cached = TokenCache.parse(JSON.parse(readFileSync(tokenCachePath, 'utf8')))
-    return cached.expires_at - tokenExpiryMarginSeconds > Date.now() / 1000 ? cached.access_token : null
-  } catch {
-    return null
-  }
-}
-
-function writeCachedToken(token: string, expiresAt: number): void {
-  try {
-    mkdirSync(dirname(tokenCachePath), { recursive: true })
-    writeFileSync(tokenCachePath, JSON.stringify({ access_token: token, expires_at: expiresAt }), { mode: 0o600 })
-  } catch {
-    return
-  }
-}
-
-function androidUserAgent(): string {
-  return `Reddit/2024.${randomInt(10, 21)}.0/Android ${randomInt(10, 15)}`
-}
-
-function deviceId(): string {
-  return Array.from({ length: 30 }, () => sample(deviceIdAlphabet)).join('')
-}
-
 function describeFailure(error: unknown): string {
   return match(error)
-    .with(P.instanceOf(TokenRequestError), (failure): string => `token request: ${describeFailure(failure.cause)}`)
-    .with(P.instanceOf(HttpError), (refused) => classifyRefusal(refused).detail)
+    .with(P.instanceOf(RedditPageError), (failure) => failure.message)
+    .with(P.instanceOf(ChromeUnavailableError), (failure) => `${failure.message} — run search-reddit outside the sandbox; \`chrome-cdp up\` starts the Chrome`)
+    .with(P.instanceOf(HttpError), describeHttpError)
     .otherwise(describeError)
 }
 
-function classifyRefusal(error: HttpError): Refusal {
-  const remaining = error.headers.get('x-ratelimit-remaining')
-  const retryAfterSeconds = toWaitSeconds(error.headers.get('retry-after')) ?? toWaitSeconds(error.headers.get('x-ratelimit-reset'))
-  const kind = match({
-    edgeBlocked: error.body.includes('blocked by network security'),
-    rateLimited: [error.status === 429, remaining !== null && Number(remaining) <= 0].some(Boolean),
-  })
-    .with({ edgeBlocked: true }, () => RefusalKind.EdgeBlock)
-    .with({ rateLimited: true }, () => RefusalKind.RateLimit)
-    .otherwise(() => RefusalKind.Other)
-
-  const detail = match(kind)
-    .with(RefusalKind.EdgeBlock, () => `HTTP ${error.status} edge block: Reddit's edge refused this client from this network ("blocked by network security")`)
-    .with(RefusalKind.RateLimit, () => `HTTP ${error.status} rate limited${retryAfterSeconds === null ? '' : `, resets in ${retryAfterSeconds}s`}`)
-    .with(RefusalKind.Other, () => `HTTP ${error.status} ${error.body.match(/"error"\s*:\s*"([^"]+)"/)?.[1] ?? error.statusText}`)
-    .exhaustive()
-
-  return { kind, status: error.status, retryAfterSeconds, detail }
+function describeHttpError(error: HttpError): string {
+  const reason = error.body.match(/"error"\s*:\s*"([^"]+)"/)?.[1] ?? error.statusText
+  const wait = retryAfterSeconds(error)
+  return `HTTP ${error.status} ${reason}${wait === null ? '' : `, retry after ${wait}s`}`
 }
 
-function toWaitSeconds(value: string | null): number | null {
+function retryAfterSeconds(error: HttpError): number | null {
+  const value = error.headers.get('retry-after') ?? error.headers.get('x-ratelimit-reset')
   const seconds = Math.floor(Number(value))
   return [value !== null, Number.isFinite(seconds), seconds > 0].every(Boolean) ? seconds : null
 }
