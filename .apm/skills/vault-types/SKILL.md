@@ -67,26 +67,10 @@ bunx vault-types eval '(vault) => vault.findMany({ where: { "data.status": "arch
 bunx vault-types eval '(vault) => vault.findMany({ where: { path: { $regex: "^projects/old-proj/" } } }).map(n => n.update({ $set: { path: n.path.replaceAll("old-proj", "new-proj") } }))'
 ```
 
-- Ссылки в body **не** переписываются — придут как `warning:`; разруливать руками (в этом vault'е связи по конвенции только во frontmatter, так что это редкость).
+- Каскад переписывает ссылки и во frontmatter, и в теле (в плане — `edit … (~body)`); руками ссылки не править.
 - Модель видит только `.md` — ассеты (картинки, PDF) в папке-инстансе двигать отдельно (`mv` + проверить `![[embeds]]`).
 - Занятый target не роняет пачку — заметка скипается с warning (режим `onPathCollision` в конфиге).
 - Если файл просто лежит не в папке своего типа — это не ручной move, а `vault.fix({ where: … }, { moveFiles: true })` / CLI `fix --move-files`.
-
-### Батч-переименование молча теряет move (временный workaround)
-
-Заметка, которая в одном батче одновременно **переименовывается** и **правится каскадом** (её frontmatter ссылается на другую переименовываемую заметку той же пачки), выпадает из плана целиком: файл не двигается, её собственные ссылки не переписываются. Ни warning'а, ни ненулевого exit code; `update()` возвращает `true` и для отброшенной заметки, а итог рапортует `applied — N file(s) written`. Вырожденный и самый частый случай — самоссылка через коллизию слагов (`instances/x.md` с `product: "[[x]]"` при живом `products/x.md`).
-
-Поэтому после **любого** батч-переименования возврат `update()` и строка `applied` не считаются подтверждением:
-
-```bash
-# сверить план с диском — в плане должно быть по строке move на каждую заметку
-NO_COLOR=1 bun run --cwd "$OBSIDIAN_VAULT" vault-types eval '…' 2>&1 | rg "^  move"
-ls <целевая папка>
-```
-
-Расходится — переименовывать по одной заметке за вызов. Если пачка уже применена и файлы не переехали: каскад ссылок к этому моменту **уже записан**, так что недостающее — ровно `mv` на оставшиеся пути (не откатывать и не переписывать ссылки заново). После — `bunx vault-types validate`.
-
-Дефект — problem-нота `batch-move-dropped-on-link-cascade` в vault (разбор условия — `batch-move-drop-condition`), секция снимается после фикса (задача `remove-batch-move-workaround-from-skill`).
 
 ## Migration-скрипт
 
@@ -107,6 +91,8 @@ export default defineMigration({
 - Runner сам открывает vault, вызывает `run(vault)`, применяет, печатает план/warnings/счётчики и закрывает в `finally`. В теле `run` НЕ вызывать `openVault()`, `vault.apply()`, `vault.close()` и не печатать план вручную.
 - Гейт записи: CLI `--apply` форсит запись, `--dry-run` форсит dry-run, иначе решает поле `apply?: boolean` миграции (default false).
 - Порядок всегда: `vault-types run migrations/x.ts` → прочитать план → тот же вызов с `--apply`.
+- Перед миграцией по всему vault — `vault.unparseable()`: ноты с битым frontmatter библиотека не трогает, их чинить отдельно.
+- Ошибки — сигнал, не глотать: `$rename` на ключ, который у ноты уже есть, мутация пути вне `data.`, `create` без `path` при не-ASCII заголовке и исключение из `vault.update` бросают; обернуть в `try` и продолжить — значит потерять правку молча.
 - Target-фичи, которых нет: `match:`-селектор с типизацией драфта (P3). Не изобретать его в скриптах.
 
 ## Типизация
@@ -120,6 +106,7 @@ export default defineMigration({
 - CLI-цикл: `bunx vault-types validate` → `fix --dry-run` → `fix`. Из библиотеки то же самое — `vault.fix(selector?, { semantic?, moveFiles?, renameFiles? })` / `note.fix()`: правки буферизуются как обычные мутации до `apply`.
 - `fix` без флагов применяет только детерминированные фиксы (порядок полей, однозначная кардинальность). Семантические — `title-format-mismatch`, `field-value-not-in-enum`, `missing-required-field` — только под `--semantic`: они перезаписывают человеческие значения, dry-run обязателен.
 - Convergence при `--semantic`: отсутствующее required-поле вставляется пустым стабом → следующий `validate` даёт `required-field-no-default` → заполнить значение (или `default:` в `.type`); повторный прогон сходится. Это ожидаемое поведение, не баг.
-- Перемещения файлов — за отдельными флагами `--move-files` / `--rename-files` (или `fixer.renameFiles` в конфиге).
+- Перемещения файлов — за отдельными флагами `--move-files` / `--rename-files` (или `fixer.renameFiles` в конфиге). В миграциях их не запускать: CLI двигает файлы голым переименованием мимо библиотеки, без каскада ссылок. Переносить через `update({ $set: { path } })`.
+- `fix --semantic` в миграциях не запускать: правка `title-format-mismatch` делает заглавной первую букву каждого латинского слова (`iPhone` → `IPhone`, `kebab-case` → `Kebab-case`).
 - Тумблеры `fixer.*` и секция `serialization` (минимальные диффы) — в `.vault-types.config.ts`; сигнатуры в `node_modules/vault-types/src/public/config.ts`.
 
