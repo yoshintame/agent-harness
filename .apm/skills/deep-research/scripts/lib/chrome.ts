@@ -11,7 +11,10 @@ const PagesResponse = z.object({
   pages: z.array(z.object({ id: z.number(), url: z.string(), selected: z.boolean() })),
 })
 
-const MessageResponse = z.object({ message: z.string() })
+const MessageResponse = z.union([
+  z.object({ message: z.string() }).transform(({ message }) => ({ message, failed: false })),
+  z.array(z.object({ text: z.string() })).transform((parts) => ({ message: parts.map((part) => part.text).join('\n'), failed: true })),
+])
 
 interface OpenPageInput {
   url: string
@@ -45,6 +48,8 @@ interface EvaluateInPageInput<T> {
 
 export async function evaluateInPage<T>({ pageId, source, schema }: EvaluateInPageInput<T>): Promise<T> {
   const response = await runChromeDevtools({ args: ['evaluate_script', '--pageId', String(pageId), source], schema: MessageResponse })
+  if (response.failed) throw new CommandError({ command, detail: `page script failed: ${response.message.split('\n')[0]}` })
+
   const payload = response.message.match(/```json\n([\s\S]*)\n```/)?.[1]
   if (payload === undefined) throw new CommandError({ command, detail: `evaluate_script returned no value: ${response.message.slice(0, 200)}` })
 

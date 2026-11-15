@@ -66,6 +66,27 @@ export async function listArcticPosts({ subreddit, title, after, before, sort, l
   return posts.map(toPostSummary)
 }
 
+export async function enrichFromArchive(posts: PostSummary[]): Promise<PostSummary[]> {
+  const ids = posts.map((post) => post.id).filter((id) => id !== '')
+  if (ids.length === 0) return posts
+
+  const archived = await getArcticData({ path: 'posts/ids', params: { ids: ids.join(',') }, itemSchema: Post })
+  const archivedById = new Map(archived.map((post) => [post.id ?? '', toPostSummary(post)]))
+
+  return posts.map((post) => {
+    const archivedPost = archivedById.get(post.id)
+    return archivedPost === undefined
+      ? post
+      : {
+          ...post,
+          flair: archivedPost.flair,
+          kind: archivedPost.kind,
+          link: archivedPost.link,
+          selftext: archivedPost.selftext === '' ? post.selftext : archivedPost.selftext,
+        }
+  })
+}
+
 export function describeArcticHttpError(error: HttpError): string {
   const reason = error.body.match(/"error"\s*:\s*"([^"]+)"/)?.[1] ?? error.statusText
   const wait = retryAfterSeconds(error)

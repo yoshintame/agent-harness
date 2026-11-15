@@ -1,5 +1,5 @@
 import { orderBy, take } from 'es-toolkit@1.52.0'
-import { match } from 'ts-pattern@5.9.0'
+import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 
 export const wwwBase = 'https://www.reddit.com'
@@ -15,6 +15,19 @@ export enum CommentSort {
   Qa = 'qa',
 }
 
+export enum PostKind {
+  Text = 'text',
+  Image = 'image',
+  Gallery = 'gallery',
+  Video = 'video',
+  Link = 'link',
+}
+
+export interface FlairFilter {
+  include: string[]
+  exclude: string[]
+}
+
 export interface CommentOptions {
   perLevel: number
   maxDepth: number
@@ -22,6 +35,7 @@ export interface CommentOptions {
 }
 
 export const Post = z.object({
+  id: z.string().nullish(),
   title: z.string().nullish(),
   subreddit: z.string().nullish(),
   score: z.number().nullish(),
@@ -30,6 +44,12 @@ export const Post = z.object({
   permalink: z.string().nullish(),
   selftext: z.string().nullish(),
   author: z.string().nullish(),
+  link_flair_text: z.string().nullish(),
+  post_hint: z.string().nullish(),
+  is_self: z.boolean().nullish(),
+  is_gallery: z.boolean().nullish(),
+  is_video: z.boolean().nullish(),
+  url: z.string().nullish(),
 })
 export type Post = z.infer<typeof Post>
 
@@ -53,6 +73,7 @@ type CommentData = z.infer<typeof CommentThing>['data']
 const RepliesListing = z.object({ data: z.object({ children: z.array(z.unknown()) }) })
 
 export interface PostSummary {
+  id: string
   title: string
   subreddit: string
   score: number | null
@@ -61,6 +82,9 @@ export interface PostSummary {
   url: string
   selftext: string
   author: string
+  flair: string | null
+  kind: PostKind | null
+  link: string | null
 }
 
 export interface Comment {
@@ -83,7 +107,9 @@ export interface Thread {
 }
 
 export function toPostSummary(post: Post): PostSummary {
+  const kind = toPostKind(post)
   return {
+    id: post.id ?? '',
     title: post.title ?? '',
     subreddit: post.subreddit ?? '',
     score: post.score ?? null,
@@ -92,7 +118,31 @@ export function toPostSummary(post: Post): PostSummary {
     url: wwwBase + (post.permalink ?? ''),
     selftext: (post.selftext ?? '').slice(0, 300),
     author: post.author ?? '',
+    flair: post.link_flair_text ? post.link_flair_text : null,
+    kind,
+    link: kind === PostKind.Link ? (post.url ?? null) : null,
   }
+}
+
+function toPostKind(post: Post): PostKind {
+  return match(post)
+    .with({ is_self: true }, () => PostKind.Text)
+    .with({ is_gallery: true }, () => PostKind.Gallery)
+    .with(P.union({ is_video: true }, { post_hint: P.union('hosted:video', 'rich:video') }), () => PostKind.Video)
+    .with({ post_hint: 'image' }, () => PostKind.Image)
+    .otherwise(() => PostKind.Link)
+}
+
+interface MatchesFlairFilterInput {
+  post: PostSummary
+  filter: FlairFilter
+}
+
+export function matchesFlairFilter({ post, filter }: MatchesFlairFilterInput): boolean {
+  const flair = post.flair?.toLowerCase() ?? null
+  const included = filter.include.length === 0 ? true : filter.include.some((wanted) => wanted.toLowerCase() === flair)
+  const excluded = flair === null ? false : filter.exclude.some((unwanted) => unwanted.toLowerCase() === flair)
+  return included ? !excluded : false
 }
 
 interface ToThreadInput {

@@ -4,8 +4,21 @@ import { join } from 'node:path'
 import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 import { alertUser, closePage, CommandError, evaluateInPage, getChromePid, openPage } from '../lib'
-import { normalizeSubreddit, type SearchPostsInput } from './query'
-import { type CommentOptions, CommentSort, extractComments, type PostSummary, type Thread, ThreadResponse, toThread, wwwBase } from './thread'
+import { type ListingSort, normalizeSubreddit, type SearchPostsInput, type TimeRange } from './query'
+import {
+  type CommentOptions,
+  CommentSort,
+  extractComments,
+  type FlairFilter,
+  matchesFlairFilter,
+  Post,
+  type PostSummary,
+  type Thread,
+  ThreadResponse,
+  toPostSummary,
+  toThread,
+  wwwBase,
+} from './thread'
 
 const minRequestGapMs = 5500
 const maxScrolls = 12
@@ -17,6 +30,8 @@ const humanWaitMs = 180_000
 const humanPollMs = 5000
 const humanGiveUpCooldownMs = 600_000
 const maxApiComments = 500
+const maxListingPageSize = 100
+const maxListingPages = 5
 const cacheDir = join(z.string().min(1).catch(join(homedir(), '.cache')).parse(process.env.XDG_CACHE_HOME ?? ''), 'search-reddit')
 const lastSlotPath = join(cacheDir, 'last-request')
 const requestLockPath = join(cacheDir, 'request.lock')
@@ -93,6 +108,7 @@ const ResultUnit = z.object({
 type ResultUnit = z.infer<typeof ResultUnit>
 
 const JsonSnapshot = PageState.extend({ data: z.unknown() })
+const ListingResponse = z.object({ data: z.object({ after: z.string().nullable(), children: z.array(z.object({ data: Post })) }) })
 const NotFoundBody = z.object({ error: z.literal(404) })
 const HumanCheckState = PageState.extend({ signedIn: z.boolean() })
 
@@ -200,6 +216,50 @@ export function fetchViaBrowser({ postId, options }: FetchViaBrowserInput): Prom
         return toThread({ post: post.data.children[0].data, comments: extractComments({ items, options, serverSorted: true }), postId, sort: options.sort })
       })
   })
+}
+
+export interface ListSubredditInput {
+  sub: string
+  sort: ListingSort
+  timeRange: TimeRange
+  limit: number
+  filter: FlairFilter
+}
+
+export function listViaBrowser(input: ListSubredditInput): Promise<PostSummary[]> {
+  return withHumanFix(() => collectListing({ input, after: null, collected: [], pagesLeft: maxListingPages }))
+}
+
+interface CollectListingInput {
+  input: ListSubredditInput
+  after: string | null
+  collected: PostSummary[]
+  pagesLeft: number
+}
+
+async function collectListing({ input, after, collected, pagesLeft }: CollectListingInput): Promise<PostSummary[]> {
+  const snapshot = await withRedditPage({ url: listingUrl({ input, after }), read: (pageId) => evaluateInPage({ pageId, source: jsonSnapshotScript, schema: JsonSnapshot }) })
+  const page = ListingResponse.safeParse(snapshot.data)
+  if (!page.success) throw toPageError(snapshot)
+
+  const posts = page.data.data.children.map(({ data }) => toPostSummary(data)).filter((post) => matchesFlairFilter({ post, filter: input.filter }))
+  const total = [...collected, ...posts]
+  const next = page.data.data.after
+  const done = [total.length >= input.limit, next === null, pagesLeft <= 1].some(Boolean)
+
+  return done ? total.slice(0, input.limit) : collectListing({ input, after: next, collected: total, pagesLeft: pagesLeft - 1 })
+}
+
+interface ListingUrlInput {
+  input: ListSubredditInput
+  after: string | null
+}
+
+function listingUrl({ input, after }: ListingUrlInput): string {
+  const params = new URLSearchParams({ limit: String(maxListingPageSize), t: input.timeRange, raw_json: '1' })
+  if (after !== null) params.set('after', after)
+
+  return `${wwwBase}/r/${normalizeSubreddit(input.sub)}/${input.sort}.json?${params}`
 }
 
 export function resolveShareLink(url: string): Promise<string> {
@@ -359,6 +419,10 @@ function toPageError({ title, text }: PageState): RedditPageError {
 function toSearchSummary(unit: ResultUnit): PostSummary {
   const createdMs = unit.created ? Date.parse(unit.created) : Number.NaN
   return {
+    id: unit.permalink.match(/\/comments\/([a-z0-9]+)/)?.[1] ?? '',
+    flair: null,
+    kind: null,
+    link: null,
     title: unit.title,
     subreddit: unit.subreddit ?? '',
     score: unit.votes ?? null,

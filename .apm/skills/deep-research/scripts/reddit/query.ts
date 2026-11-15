@@ -17,6 +17,14 @@ export enum TimeRange {
   All = 'all',
 }
 
+export enum ListingSort {
+  Top = 'top',
+  Hot = 'hot',
+  New = 'new',
+  Rising = 'rising',
+  Controversial = 'controversial',
+}
+
 export enum ArcticSort {
   Desc = 'desc',
   Asc = 'asc',

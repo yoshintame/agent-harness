@@ -59,7 +59,11 @@ bun --install=fallback <skill-dir>/scripts/search-github.ts search "<имя> in:
 
 ```bash
 bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "built" --sub <subreddit> --sort new --time year --limit 25
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts top <subreddit> --sort new --exclude-flair meme --limit 50   # свежее в сабе без запроса
+bun --install=fallback <skill-dir>/scripts/search-reddit.ts top <subreddit> --time year --exclude-flair meme             # лучшее за год без запроса
 ```
+
+У каждого поста в выдаче стоит флейр и тип (`text`, `image`, `gallery`, `video`, `link`), а ниже — начало текста поста. Флейр — главный фильтр мусора: `--exclude-flair meme` отсекает мемы, `--flair "<флейр>"` оставляет только нужное. Названия флейров у каждого сабреддита свои — посмотри их в первой выдаче без фильтра. `image` без текста — пост-скриншот: смысл у него в картинке, а её скрипт не скачивает. Если заголовок важен, открой тред через `fetch` и восстанови содержимое скриншота по комментариям.
 
 Строка stderr `note: served by arctic` значит, что выдачу отдал архив Arctic Shift, а не Reddit: совпадение только по заголовку, свежие сверху при любом `--sort`, баллы — снимок архива. Советы про сортировку выше на такой выдаче не работают; назови источник в отчёте рядом с выводами, которые на нём стоят. Тот же архив вручную: `bun --install=fallback <skill-dir>/scripts/search-reddit.ts arctic <sub> --title "<слова>" --after YYYY-MM-DD`.
 
