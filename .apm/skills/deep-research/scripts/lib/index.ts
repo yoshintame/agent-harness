@@ -1,5 +1,5 @@
-export { closePage, evaluateInPage, getChromePid, openPage } from './chrome'
-export { alertUser } from './desktop'
+export { type BrowserPage, closePage, evaluateInPage, getChromePid, listPages, navigatePage, openPage } from './chrome'
+export { alertUser, keepingFocus } from './desktop'
 export { describeError, emit, fail, jsonArg, limitArg, parseCount, parseOptionalCount, ReportError, readLimit, runCli } from './cli'
 export { HttpError, requestJson } from './http'
 export { CommandError, runJsonCommand } from './process'

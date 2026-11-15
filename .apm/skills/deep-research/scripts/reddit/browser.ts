@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
-import { alertUser, closePage, CommandError, evaluateInPage, getChromePid, openPage } from '../lib'
+import { alertUser, closePage, CommandError, evaluateInPage, getChromePid, keepingFocus, listPages, navigatePage, openPage } from '../lib'
 import { type ListingSort, normalizeSubreddit, type SearchPostsInput, type TimeRange } from './query'
 import {
   type CommentOptions,
@@ -26,6 +26,9 @@ const scrollSettleMs = 1500
 const lockRetryMs = 100
 const lockAttempts = 100
 const staleLockMs = 30_000
+const workerLockRetryMs = 250
+const workerLockAttempts = 600
+const staleWorkerLockMs = 150_000
 const humanWaitMs = 180_000
 const humanPollMs = 5000
 const humanGiveUpCooldownMs = 600_000
@@ -37,6 +40,9 @@ const lastSlotPath = join(cacheDir, 'last-request')
 const requestLockPath = join(cacheDir, 'request.lock')
 const humanLockPath = join(cacheDir, 'human.lock')
 const humanGaveUpPath = join(cacheDir, 'human-gave-up')
+const workerPagePath = join(cacheDir, 'worker-page')
+const workerLockPath = join(cacheDir, 'worker.lock')
+const blankUrl = 'about:blank'
 const blockedPhrase = 'blocked by network security'
 const challengePhrase = 'Prove your humanity'
 const resultLinkSelector = 'a[data-testid=post-title]'
@@ -482,13 +488,36 @@ interface WithRedditPageInput<T> {
 }
 
 async function withRedditPage<T>({ url, read }: WithRedditPageInput<T>): Promise<T> {
-  await waitForRequestSlot()
-  const pageId = await openPage({ url, background: true })
+  mkdirSync(cacheDir, { recursive: true })
+  removeLockOlderThan({ path: workerLockPath, maxAgeMs: staleWorkerLockMs })
+  await acquireLock({ path: workerLockPath, attemptsLeft: workerLockAttempts, retryMs: workerLockRetryMs, staleMs: staleWorkerLockMs })
 
   try {
-    return await read(pageId)
+    const pageId = await getWorkerPage()
+    await waitForRequestSlot()
+    await navigatePage({ pageId, url })
+    return await read(pageId).finally(() => navigatePage({ pageId, url: blankUrl }).catch(() => undefined))
   } finally {
-    await closePage(pageId)
+    rmSync(workerLockPath, { force: true, recursive: true })
+  }
+}
+
+async function getWorkerPage(): Promise<number> {
+  const savedId = readSavedWorkerPage()
+  const pages = await listPages()
+  const saved = pages.find((page) => [page.id === savedId, [page.url === blankUrl, page.url.startsWith(wwwBase)].some(Boolean)].every(Boolean))
+  if (saved !== undefined) return saved.id
+
+  const pageId = await keepingFocus(() => openPage({ url: blankUrl, background: true }))
+  writeFileSync(workerPagePath, String(pageId))
+  return pageId
+}
+
+function readSavedWorkerPage(): number | null {
+  try {
+    return z.coerce.number().int().nullable().catch(null).parse(readFileSync(workerPagePath, 'utf8'))
+  } catch {
+    return null
   }
 }
 
@@ -499,7 +528,7 @@ async function waitForRequestSlot(): Promise<void> {
 
 async function reserveRequestSlot(): Promise<number> {
   mkdirSync(cacheDir, { recursive: true })
-  await acquireRequestLock({ attemptsLeft: lockAttempts })
+  await acquireLock({ path: requestLockPath, attemptsLeft: lockAttempts, retryMs: lockRetryMs, staleMs: staleLockMs })
 
   try {
     const slot = Math.max(Date.now(), readLastSlot() + minRequestGapMs)
@@ -510,17 +539,20 @@ async function reserveRequestSlot(): Promise<number> {
   }
 }
 
-interface AcquireRequestLockInput {
+interface AcquireLockInput {
+  path: string
   attemptsLeft: number
+  retryMs: number
+  staleMs: number
 }
 
-async function acquireRequestLock({ attemptsLeft }: AcquireRequestLockInput): Promise<void> {
-  return match({ created: tryCreateLock(requestLockPath), exhausted: attemptsLeft === 0 })
+async function acquireLock({ path, attemptsLeft, retryMs, staleMs }: AcquireLockInput): Promise<void> {
+  return match({ created: tryCreateLock(path), exhausted: attemptsLeft === 0 })
     .with({ created: true }, () => undefined)
-    .with({ exhausted: true }, () => takeOverStaleRequestLock())
+    .with({ exhausted: true }, () => takeOverStaleLock({ path, staleMs }))
     .otherwise(async () => {
-      await Bun.sleep(lockRetryMs)
-      return acquireRequestLock({ attemptsLeft: attemptsLeft - 1 })
+      await Bun.sleep(retryMs)
+      return acquireLock({ path, attemptsLeft: attemptsLeft - 1, retryMs, staleMs })
     })
 }
 
@@ -533,10 +565,15 @@ function tryCreateLock(path: string): boolean {
   }
 }
 
-function takeOverStaleRequestLock(): void {
-  removeLockOlderThan({ path: requestLockPath, maxAgeMs: staleLockMs })
-  if (!tryCreateLock(requestLockPath)) {
-    throw new RedditPageError({ refusal: PageRefusal.Unexpected, detail: 'another search-reddit run holds the request lock; retry in a few seconds' })
+interface TakeOverStaleLockInput {
+  path: string
+  staleMs: number
+}
+
+function takeOverStaleLock({ path, staleMs }: TakeOverStaleLockInput): void {
+  removeLockOlderThan({ path, maxAgeMs: staleMs })
+  if (!tryCreateLock(path)) {
+    throw new RedditPageError({ refusal: PageRefusal.Unexpected, detail: 'another search-reddit run keeps the agent Chrome tab busy; retry in a minute' })
   }
 }
 

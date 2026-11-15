@@ -30,6 +30,25 @@ export async function openPage({ url, background }: OpenPageInput): Promise<numb
   return page.id
 }
 
+export interface BrowserPage {
+  id: number
+  url: string
+}
+
+export async function listPages(): Promise<BrowserPage[]> {
+  const response = await runChromeDevtools({ args: ['list_pages'], schema: PagesResponse })
+  return response.pages.map(({ id, url }) => ({ id, url }))
+}
+
+interface NavigatePageInput {
+  pageId: number
+  url: string
+}
+
+export async function navigatePage({ pageId, url }: NavigatePageInput): Promise<void> {
+  await runChromeDevtools({ args: ['navigate_page', String(pageId), '--type', 'url', '--url', url, '--timeout', String(pageLoadTimeoutMs)], schema: z.unknown() })
+}
+
 export async function closePage(pageId: number): Promise<void> {
   await runChromeDevtools({ args: ['close_page', String(pageId)], schema: z.unknown() }).catch(() => undefined)
 }
