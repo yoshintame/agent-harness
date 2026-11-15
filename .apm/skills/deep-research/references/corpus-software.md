@@ -5,7 +5,7 @@
 | Знаешь | Чем искать |
 |---|---|
 | **возможность своими словами** | WebSearch |
-| **имя** | `bun --install=fallback <skill-dir>/scripts/search-github.ts search "<имя> in:name"` |
+| **имя** | `search-github search "<имя> in:name"` |
 | **ни того ни другого** | awesome-майнинг, анонсы HN и Reddit |
 
 Источники индексируются по-разному, поэтому выкинуть любой — дыра:
@@ -18,29 +18,29 @@
 
 Кураторские индексы (awesome-списки) дают широкий срез дёшево, но не полагайся на них как на главный канал: крупные списки README-only, часть написана вендорами про себя, а выдача по слову `awesome` засорена клонами-фермами. Похороненный слой анонсов даёт больше — см. HN ниже.
 
-Вызовы: скрипты **всегда с `dangerouslyDisableSandbox: true`** — песочница закрывает сеть до их хостов, а `search-github` вдобавок не может прочитать `~/.config/gh`, и ошибка читается как обычный сбой команды. Тред целиком — `bun --install=fallback <skill-dir>/scripts/search-reddit.ts fetch <url>` / `bun --install=fallback <skill-dir>/scripts/search-hn.ts fetch <id>`, не WebFetch: вывод чище. У `search-reddit fetch` есть `--comments N` (на уровень; `0` — только пост), `--depth D` (уровней; по умолчанию 3) и `--sort top|best|new|old|controversial|qa` — порядок задаёт сам Reddit; `controversial` поднимает спорные ветки — с них начинай поиск претензий к инструменту.
+Тред целиком — `search-hn fetch <id>` и `search-reddit fetch <url>`, не WebFetch. `fetch --sort controversial` поднимает спорные ветки — с них начинай поиск претензий к инструменту; `fetch --comments 0` — только пост, когда из анонса нужна лишь ссылка.
 
 ## Awesome-майнинг — три шага, первым делом
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-github.ts awesome "<capability>"     # шаг 1, ракурс возможности: «semantic search»
-bun --install=fallback <skill-dir>/scripts/search-github.ts awesome "<ecosystem>"      # шаг 1, ракурс экосистемы: «claude-code», «obsidian»
+search-github awesome "<capability>"     # шаг 1, ракурс возможности: «semantic search»
+search-github awesome "<ecosystem>"      # шаг 1, ракурс экосистемы: «claude-code», «obsidian»
 gh api repos/<owner>/<repo>/contents --jq '.[].name'                       # шаг 2а: что вообще лежит в списке
 gh api repos/<owner>/<repo>/contents/README.md --jq .content | base64 -d   # шаг 2б: прочитать README
-bun --install=fallback <skill-dir>/scripts/search-github.ts search "<query>"           # шаг 3: прямой поиск, добивка после майнинга
+search-github search "<query>"           # шаг 3: прямой поиск, добивка после майнинга
 ```
 
 Шаг 2 — то, ради чего всё: найти awesome-список — не значит прочитать его; список, найденный шагом 1 и не прочитанный, — несделанный шаг. Сначала посмотри состав репозитория: у крупных списков данные лежат в машиночитаемой таблице рядом с README (`*.csv`, `*.json`, `data/`), и она полнее. README читай целиком, семантически: лексика автора списка расходится с твоей, и греп по ключевым словам промахивается так же, как буквальный поиск GitHub, — а проход глазами ловит кандидата, описанного чужими словами. Греп (`… | rg -i '<name>'`) оставь для одного случая: проверить, есть ли в списке уже известное имя.
 
-Шаг 3 буквален: `bun --install=fallback <skill-dir>/scripts/search-github.ts search` матчит `name`/`description`, то есть попадает, только когда запрос почти цитирует слова автора. Поэтому прогони ≥3 разных формулировки того, как автор мог назвать или описать инструмент, а пустую выдачу трактуй как ничего не доказывающую — главным каналом дискавери этот шаг быть не может. Звёздные фильтры (`--stars ">30"`) молча режут хвост, где живут новые инструменты, — во время дискавери не ставь.
+Шаг 3 буквален: `search-github search` матчит `name`/`description`, то есть попадает, только когда запрос почти цитирует слова автора. Поэтому прогони ≥3 разных формулировки того, как автор мог назвать или описать инструмент, а пустую выдачу трактуй как ничего не доказывающую — главным каналом дискавери этот шаг быть не может. Звёздные фильтры (`--stars ">30"`) молча режут хвост, где живут новые инструменты, — во время дискавери не ставь.
 
 **Знаешь имя — ищи его с `in:name`**, а не свободным запросом: выдача ранжируется с поправкой на популярность, поэтому точное совпадение тонет под похожими популярными репозиториями, а репозиторий с нулём звёзд не выплывает никогда. Квалификаторы GitHub проходят через скрипт насквозь.
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-github.ts search "<имя> in:name"
+search-github search "<имя> in:name"
 ```
 
-Отсюда же правило резолва: **имя, встреченное в тексте, доводится до репозитория, а не остаётся именем.** У анонса Reddit или HN ссылка почти всегда в теле поста — `bun --install=fallback <skill-dir>/scripts/search-reddit.ts fetch <url>` / `bun --install=fallback <skill-dir>/scripts/search-hn.ts fetch <id>`. У обзорной статьи («я протестировал N инструментов») ссылок может не быть вовсе, там имя резолвится через `bun --install=fallback <skill-dir>/scripts/search-github.ts search "<имя> in:name"`. Обзор, из которого не вынесено ни одного кандидата, прочитан впустую.
+Отсюда же правило резолва: **имя, встреченное в тексте, доводится до репозитория, а не остаётся именем.** У анонса Reddit или HN ссылка почти всегда в теле поста — `search-reddit fetch <url>` / `search-hn fetch <id>`. У обзорной статьи («я протестировал N инструментов») ссылок может не быть вовсе, там имя резолвится через `search-github search "<имя> in:name"`. Обзор, из которого не вынесено ни одного кандидата, прочитан впустую.
 
 Тот же порядок в ветке «есть ли известный баг»: issue-трекер репозитория и changelog — первичный источник, `search-reddit`/`search-hn` добирают обсуждения, которых в трекере нет.
 
@@ -58,36 +58,30 @@ bun --install=fallback <skill-dir>/scripts/search-github.ts search "<имя> in:
 - **Настроения и migration stories → `relevance` или `top`** — там высокий скор и есть сигнал.
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-reddit.ts search "built" --sub <subreddit> --sort new --time year --limit 25
-bun --install=fallback <skill-dir>/scripts/search-reddit.ts top <subreddit> --sort new --exclude-flair meme --limit 50   # свежее в сабе без запроса
-bun --install=fallback <skill-dir>/scripts/search-reddit.ts top <subreddit> --time year --exclude-flair meme             # лучшее за год без запроса
+search-reddit search "built" --sub <subreddit> --sort new --time year --limit 25
+search-reddit top <subreddit> --sort new --exclude-flair "<флейр мемов>" --limit 50   # свежее в сабе без запроса
+search-reddit top <subreddit> --time year --exclude-flair "<флейр мемов>"             # лучшее за год без запроса
 ```
 
-У каждого поста в выдаче стоит флейр и тип (`text`, `image`, `gallery`, `video`, `link`), а ниже — начало текста поста. Флейр — главный фильтр мусора: `--exclude-flair meme` отсекает мемы, `--flair "<флейр>"` оставляет только нужное. Названия флейров у каждого сабреддита свои: `bun --install=fallback <skill-dir>/scripts/search-reddit.ts flairs <subreddit>` перечисляет их, а если сабреддит список не публикует — посмотри флейры в первой выдаче `top` без фильтра. `image` без текста — пост-скриншот: смысл у него в картинке, а её скрипт не скачивает. Если заголовок важен, открой тред через `fetch` и восстанови содержимое скриншота по комментариям.
-
-Дата в каждой строке выдачи и в шапке `fetch` — фильтр свежести: `2023-10-15, edited 2025-08-12` значит, что пост создан в 2023-м, а автор правил его в 2025-м. Топ за всё время держится на накопленных баллах, а не на актуальности, поэтому гайд старше года сверяй с постами за последний год, а `fetch <url> --sort new` покажет, не пишут ли в свежих комментариях, что инструкция устарела.
-
-Строка stderr `note: served by arctic` значит, что выдачу отдал архив Arctic Shift, а не Reddit: совпадение только по заголовку, свежие сверху при любом `--sort`, баллы — снимок архива. Советы про сортировку выше на такой выдаче не работают; назови источник в отчёте рядом с выводами, которые на нём стоят. Тот же архив вручную: `bun --install=fallback <skill-dir>/scripts/search-reddit.ts arctic <sub> --title "<слова>" --after YYYY-MM-DD`.
-
-Запросы держи в 2 слова; длиннее — только вместе с `--sub`: поиск Reddit матчит и тело поста, и длинный запрос без сабреддита тонет в случайных совпадениях. Lucene-синтаксис (`+word`) HTML-поиск Reddit не понимает. Пустая выдача на длинном запросе — повод укоротить запрос, а не вывод об отсутствии.
+Флейры, даты, Arctic и длину запроса разбирает раздел Reddit в SKILL.md.
 
 ## HN
 
 Ценность HN — не аудитория и не комментарии, а работающий поиск Algolia по заголовкам и текстам анонсов. Запускай его, даже когда тема кажется не-HN-ной: анонс инструмента попадает туда независимо от того, «профильная» ли для HN область.
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-hn.ts search "<query>" --tags show_hn   # анонсы и запуски
-bun --install=fallback <skill-dir>/scripts/search-hn.ts search "<query>" --by-date        # хронологически: свежий инцидент, релиз, разбор
+search-hn search "<query>" --tags show_hn   # анонсы и запуски
+search-hn search "<query>" --by-date        # хронологически: свежий инцидент, релиз, разбор
 ```
 
 ## Discourse
 
-Форумы на Discourse закрывают `/search` в robots.txt, поэтому тред находи через WebSearch `site:<host> <query>`, а читай скриптом. `latest` — свежие темы инстанса для мониторинга тренда.
+Если у экосистемы есть Discourse-форум (известные — `search-discourse instances`), ищи треды WebSearch'ем `site:<host> <query>` — `/search` у Discourse закрыт в robots.txt — и читай `fetch`. `latest <alias|host>` — что обсуждают сейчас, для вопросов про свежий инцидент или релиз.
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-discourse.ts fetch <topic-url>        # тред с постами
-bun --install=fallback <skill-dir>/scripts/search-discourse.ts latest <alias|host>      # свежие темы: rust, obsidian, hass, docker…
-bun --install=fallback <skill-dir>/scripts/search-discourse.ts instances                # известные алиасы
+search-discourse fetch <topic-url>        # тред с постами
+search-discourse latest <alias|host>      # свежие темы: rust, obsidian, hass, docker…
+search-discourse instances                # известные алиасы
 ```
 
 ## Красные флаги кандидата
@@ -97,7 +91,7 @@ bun --install=fallback <skill-dir>/scripts/search-discourse.ts instances        
 Первые четыре снимаются одной командой — прогоняй её по каждому финалисту, а не читай карточку репозитория глазами:
 
 ```bash
-bun --install=fallback <skill-dir>/scripts/search-github.ts health <owner/repo>
+search-github health <owner/repo>
 ```
 
-Ещё один канал дискавери мимо поиска — `bun --install=fallback <skill-dir>/scripts/search-github.ts trending <topic>`: ранжирует по звёздам в день, поэтому показывает молодое и растущее, которое по абсолютным звёздам ещё невидимо.
+Ещё один канал дискавери мимо поиска — `search-github trending <topic>`: ранжирует по звёздам в день, поэтому показывает молодое и растущее, которое по абсолютным звёздам ещё невидимо.
