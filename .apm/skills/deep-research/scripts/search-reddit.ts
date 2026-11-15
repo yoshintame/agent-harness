@@ -31,6 +31,7 @@ import {
   fetchViaArctic,
   fetchViaBrowser,
   listArcticPosts,
+  listFlairs,
   ListingSort,
   listViaBrowser,
   matchesFlairFilter,
@@ -39,6 +40,7 @@ import {
   resolveShareLink,
   type SearchPostsInput,
   SearchSort,
+  type SubredditFlair,
   searchViaArctic,
   searchViaBrowser,
   type Thread,
@@ -172,6 +174,18 @@ const fetchCommand = defineCommand({
   },
 })
 
+const flairsCommand = defineCommand({
+  meta: { name: 'flairs', description: 'List the post flairs a subreddit offers, for --flair and --exclude-flair' },
+  args: {
+    subreddit: { type: 'positional', required: true, description: 'Subreddit name (e.g. StremioAddons)' },
+    json: jsonArg,
+  },
+  async run({ args }) {
+    const flairs = await listFlairs(args.subreddit).catch((error: unknown) => fail(`search-reddit flairs: ${describeFailure(error)}`))
+    emit({ value: flairs, json: args.json, printMarkdown: printFlairs })
+  },
+})
+
 const arcticCommand = defineCommand({
   meta: { name: 'arctic', description: 'List a subreddit chronologically via the Arctic Shift archive (no auth)' },
   args: {
@@ -204,7 +218,7 @@ const main = defineCommand({
     name: 'search-reddit',
     description: 'Reddit search and thread fetch through the signed-in chrome-cdp Chrome, with the Arctic Shift archive as fallback',
   },
-  subCommands: { search, top, fetch: fetchCommand, arctic: arcticCommand },
+  subCommands: { search, top, flairs: flairsCommand, fetch: fetchCommand, arctic: arcticCommand },
 })
 
 function searchPosts(input: SearchPostsInput): Promise<StageResult<PostSummary[]>> {
@@ -347,6 +361,12 @@ function printPosts(posts: PostSummary[]): void {
       ]
     },
   })
+}
+
+function printFlairs(flairs: SubredditFlair[]): void {
+  if (flairs.length === 0) return console.log('This subreddit offers no post flairs.')
+
+  for (const flair of flairs) console.log(flair.mod_only ? `${flair.text}  (mods only)` : flair.text)
 }
 
 function printThread(thread: Thread): void {

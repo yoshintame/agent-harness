@@ -108,6 +108,7 @@ const ResultUnit = z.object({
 type ResultUnit = z.infer<typeof ResultUnit>
 
 const JsonSnapshot = PageState.extend({ data: z.unknown() })
+const FlairsResponse = z.array(z.object({ text: z.string(), mod_only: z.boolean().nullish() }))
 const ListingResponse = z.object({ data: z.object({ after: z.string().nullable(), children: z.array(z.object({ data: Post })) }) })
 const NotFoundBody = z.object({ error: z.literal(404) })
 const HumanCheckState = PageState.extend({ signedIn: z.boolean() })
@@ -262,6 +263,31 @@ function listingUrl({ input, after }: ListingUrlInput): string {
   return `${wwwBase}/r/${normalizeSubreddit(input.sub)}/${input.sort}.json?${params}`
 }
 
+export interface SubredditFlair {
+  text: string
+  mod_only: boolean
+}
+
+export function listFlairs(sub: string): Promise<SubredditFlair[]> {
+  return withHumanFix(async () => {
+    const url = `${wwwBase}/r/${normalizeSubreddit(sub)}/api/link_flair_v2.json?raw_json=1`
+    const snapshot = await withRedditPage({ url, read: (pageId) => evaluateInPage({ pageId, source: jsonSnapshotScript, schema: JsonSnapshot }) })
+    return match(snapshot.data)
+      .with(P.when((data) => FlairsResponse.safeParse(data).success), (data) =>
+        FlairsResponse.parse(data).map((flair) => ({ text: flair.text, mod_only: flair.mod_only ?? false })),
+      )
+      .with({ error: P.number }, ({ error }) => {
+        throw new RedditPageError({
+          refusal: PageRefusal.Unexpected,
+          detail: `r/${normalizeSubreddit(sub)} does not publish its flair list (Reddit answered ${error}); read flairs off \`top\` output instead`,
+        })
+      })
+      .otherwise(() => {
+        throw toPageError(snapshot)
+      })
+  })
+}
+
 export function resolveShareLink(url: string): Promise<string> {
   return withHumanFix(async () => {
     const page = await withRedditPage({
@@ -301,12 +327,28 @@ async function withHumanFix<T>(attempt: () => Promise<T>): Promise<T> {
       .with(P.intersection(P.instanceOf(RedditPageError), { refusal: P.union(PageRefusal.Blocked, PageRefusal.Challenge) }), (failure) => failure)
       .otherwise(() => null)
     if (refused === null) throw error
+    if (await isSessionHealthy()) {
+      throw new RedditPageError({
+        refusal: PageRefusal.Unexpected,
+        detail: 'Reddit refused this page although the session is fine: the subreddit or post is private, banned or missing',
+      })
+    }
 
     const fixed = await awaitHumanFix(refused.refusal)
     if (!fixed) throw new RedditPageError({ refusal: refused.refusal, detail: `${refused.message} (nobody fixed it within ${humanWaitMs / 60_000} min)` })
 
     return attempt()
   }
+}
+
+async function isSessionHealthy(): Promise<boolean> {
+  const state = await withRedditPage({ url: `${wwwBase}/`, read: (pageId) => evaluateInPage({ pageId, source: humanCheckScript, schema: HumanCheckState }) }).catch(() => null)
+  return state === null ? false : isFixedState(state)
+}
+
+function isFixedState(state: z.infer<typeof HumanCheckState>): boolean {
+  const refused = [blockedPhrase, challengePhrase].some((phrase) => `${state.title} ${state.text}`.includes(phrase))
+  return [state.signedIn, !refused].every(Boolean)
 }
 
 async function awaitHumanFix(refusal: PageRefusal): Promise<boolean> {
@@ -341,8 +383,7 @@ interface PollUntilFixedInput {
 async function pollUntilFixed({ pageId, deadline }: PollUntilFixedInput): Promise<boolean> {
   await Bun.sleep(humanPollMs)
   const state = await evaluateInPage({ pageId, source: humanCheckScript, schema: HumanCheckState }).catch(() => null)
-  const refused = state === null ? true : [blockedPhrase, challengePhrase].some((phrase) => `${state.title} ${state.text}`.includes(phrase))
-  const fixed = state === null ? false : [state.signedIn, !refused].every(Boolean)
+  const fixed = state === null ? false : isFixedState(state)
 
   return match({ fixed, expired: Date.now() >= deadline })
     .with({ fixed: true }, () => true)
