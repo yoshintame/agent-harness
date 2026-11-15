@@ -6,15 +6,14 @@ const command = 'chrome-devtools'
 const commandTimeoutMs = 60_000
 const statusTimeoutMs = 10_000
 const pageLoadTimeoutMs = 30_000
+const syncTimeoutMs = 10_000
 
 const PagesResponse = z.object({
   pages: z.array(z.object({ id: z.number(), url: z.string(), selected: z.boolean() })),
 })
 
-const MessageResponse = z.union([
-  z.object({ message: z.string() }).transform(({ message }) => ({ message, failed: false })),
-  z.array(z.object({ text: z.string() })).transform((parts) => ({ message: parts.map((part) => part.text).join('\n'), failed: true })),
-])
+const MessageResponse = z.object({ message: z.string() })
+const ToolErrorResponse = z.array(z.object({ text: z.string() }))
 
 interface OpenPageInput {
   url: string
@@ -46,7 +45,17 @@ interface NavigatePageInput {
 }
 
 export async function navigatePage({ pageId, url }: NavigatePageInput): Promise<void> {
-  await runChromeDevtools({ args: ['navigate_page', String(pageId), '--type', 'url', '--url', url, '--timeout', String(pageLoadTimeoutMs)], schema: z.unknown() })
+  const args = ['navigate_page', String(pageId), '--type', 'url', '--url', url, '--timeout', String(pageLoadTimeoutMs)]
+  const response = await runChromeDevtools({ args, schema: MessageResponse })
+  if (!response.message.includes('Successfully navigated')) throw new CommandError({ command, detail: `navigation failed: ${firstLine(response.message)}` })
+}
+
+export function navigatePageNow({ pageId, url }: NavigatePageInput): void {
+  Bun.spawnSync([command, 'navigate_page', String(pageId), '--type', 'url', '--url', url], { stdout: 'ignore', stderr: 'ignore', timeout: syncTimeoutMs })
+}
+
+export function closePageNow(pageId: number): void {
+  Bun.spawnSync([command, 'close_page', String(pageId)], { stdout: 'ignore', stderr: 'ignore', timeout: syncTimeoutMs })
 }
 
 export async function closePage(pageId: number): Promise<void> {
@@ -67,8 +76,6 @@ interface EvaluateInPageInput<T> {
 
 export async function evaluateInPage<T>({ pageId, source, schema }: EvaluateInPageInput<T>): Promise<T> {
   const response = await runChromeDevtools({ args: ['evaluate_script', '--pageId', String(pageId), source], schema: MessageResponse })
-  if (response.failed) throw new CommandError({ command, detail: `page script failed: ${response.message.split('\n')[0]}` })
-
   const payload = response.message.match(/```json\n([\s\S]*)\n```/)?.[1]
   if (payload === undefined) throw new CommandError({ command, detail: `evaluate_script returned no value: ${response.message.slice(0, 200)}` })
 
@@ -80,6 +87,14 @@ interface RunChromeDevtoolsInput<T> {
   schema: z.ZodType<T>
 }
 
-function runChromeDevtools<T>({ args, schema }: RunChromeDevtoolsInput<T>): Promise<T> {
-  return runJsonCommand({ command, args: [...args, '--output-format', 'json'], schema, timeoutMs: commandTimeoutMs })
+async function runChromeDevtools<T>({ args, schema }: RunChromeDevtoolsInput<T>): Promise<T> {
+  const response = await runJsonCommand({ command, args: [...args, '--output-format', 'json'], schema: z.unknown(), timeoutMs: commandTimeoutMs })
+  const toolError = ToolErrorResponse.safeParse(response)
+  if (toolError.success) throw new CommandError({ command, detail: `${args[0]} failed: ${firstLine(toolError.data.map((part) => part.text).join('\n'))}` })
+
+  return schema.parse(response)
+}
+
+function firstLine(text: string): string {
+  return text.replace(/^Error:\s*/, '').split('\n')[0] ?? ''
 }

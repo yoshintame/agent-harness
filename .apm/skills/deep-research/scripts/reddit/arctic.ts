@@ -1,14 +1,17 @@
-import { retry } from 'es-toolkit@1.52.0'
+import { chunk, retry } from 'es-toolkit@1.52.0'
 import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 import { HttpError, requestJson } from '../lib'
-import { ArcticSort, normalizeSubreddit, type SearchPostsInput, toArcticTitleWords, toSinceEpochSeconds } from './query'
-import { type CommentOptions, extractComments, Post, type PostSummary, type Thread, toPostSummary, toThread } from './thread'
+import { collectMatching } from './collect'
+import { ArcticSort, type SearchPostsInput, toArcticTitleWords, toSinceEpochSeconds } from './query'
+import { type CommentOptions, extractComments, type FlairFilter, Post, type PostSummary, type Thread, toPostSummary, toThread } from './thread'
 
 const arcticBase = 'https://arctic-shift.photon-reddit.com/api'
 const arcticUserAgent = 'search-reddit/2.0 (personal research CLI)'
 const arcticTimeoutMs = 30_000
+const enrichTimeoutMs = 8000
 const maxRetryWaitSeconds = 10
+const maxArcticPageSize = 100
 
 const arcticRetry = {
   retries: 2,
@@ -27,13 +30,16 @@ const arcticRetry = {
 
 interface SearchViaArcticInput extends Omit<SearchPostsInput, 'sub' | 'sort'> {
   sub: string
+  filter: FlairFilter
 }
 
-export async function searchViaArctic({ query, sub, timeRange, limit }: SearchViaArcticInput): Promise<PostSummary[]> {
+export async function searchViaArctic({ query, sub, timeRange, limit, filter }: SearchViaArcticInput): Promise<PostSummary[]> {
   const words = toArcticTitleWords(query)
   if (!words) throw new Error('nothing left to match on titles after stripping Reddit syntax')
 
-  return listArcticPosts({ subreddit: sub, title: words, after: toSinceEpochSeconds(timeRange)?.toString(), before: undefined, sort: ArcticSort.Desc, limit })
+  const since = toSinceEpochSeconds(timeRange)
+  const pages = arcticPostPages({ subreddit: sub, title: words, after: since === undefined ? undefined : String(since), before: undefined, sort: ArcticSort.Desc })
+  return collectMatching({ pages, filter, limit })
 }
 
 interface FetchViaArcticInput {
@@ -49,29 +55,36 @@ export async function fetchViaArctic({ postId, options }: FetchViaArcticInput): 
   return toThread({ post, comments: extractComments({ items: tree, options, serverSorted: false }), postId, sort: options.sort })
 }
 
-interface ListArcticPostsInput {
+export interface ArcticPostPagesInput {
   subreddit: string
   title: string | undefined
   after: string | undefined
   before: string | undefined
   sort: ArcticSort
-  limit: number
 }
 
-export async function listArcticPosts({ subreddit, title, after, before, sort, limit }: ListArcticPostsInput): Promise<PostSummary[]> {
-  const name = normalizeSubreddit(subreddit)
-  if (!name) throw new Error('arctic requires a subreddit')
+export async function* arcticPostPages({ subreddit, title, after, before, sort }: ArcticPostPagesInput): AsyncGenerator<PostSummary[]> {
+  const params = { subreddit, sort, limit: String(maxArcticPageSize), title, after, before }
+  const posts = await getArcticData({ path: 'posts/search', params, itemSchema: Post })
+  yield posts.map(toPostSummary)
 
-  const posts = await getArcticData({ path: 'posts/search', params: { subreddit: name, sort, limit: String(limit), title, after, before }, itemSchema: Post })
-  return posts.map(toPostSummary)
+  const last = posts.at(-1)?.created_utc
+  if ([posts.length < maxArcticPageSize, last === undefined, last === null].some(Boolean)) return
+
+  const cursor = String(last)
+  yield* arcticPostPages(sort === ArcticSort.Desc ? { subreddit, title, after, before: cursor, sort } : { subreddit, title, after: cursor, before, sort })
 }
 
 export async function enrichFromArchive(posts: PostSummary[]): Promise<PostSummary[]> {
-  const ids = posts.map((post) => post.id).filter((id) => id !== '')
+  const ids = posts.map((post) => post.id)
   if (ids.length === 0) return posts
 
-  const archived = await getArcticData({ path: 'posts/ids', params: { ids: ids.join(',') }, itemSchema: Post })
-  const archivedById = new Map(archived.map((post) => [post.id ?? '', toPostSummary(post)]))
+  const batches = await Promise.all(
+    chunk(ids, maxArcticPageSize).map((batch) =>
+      getArcticData({ path: 'posts/ids', params: { ids: batch.join(',') }, itemSchema: Post, timeoutMs: enrichTimeoutMs, retries: 0 }),
+    ),
+  )
+  const archivedById = new Map(batches.flat().map((post) => [post.id ?? '', toPostSummary(post)]))
 
   return posts.map((post) => {
     const archivedPost = archivedById.get(post.id)
@@ -81,6 +94,7 @@ export async function enrichFromArchive(posts: PostSummary[]): Promise<PostSumma
           ...post,
           edited_utc: archivedPost.edited_utc,
           flair: archivedPost.flair,
+          flair_known: true,
           kind: archivedPost.kind,
           link: archivedPost.link,
           selftext: archivedPost.selftext === '' ? post.selftext : archivedPost.selftext,
@@ -90,7 +104,7 @@ export async function enrichFromArchive(posts: PostSummary[]): Promise<PostSumma
 
 export function describeArcticHttpError(error: HttpError): string {
   const reason = error.body.match(/"error"\s*:\s*"([^"]+)"/)?.[1] ?? error.statusText
-  const wait = retryAfterSeconds(error)
+  const wait = error.status === 429 ? retryAfterSeconds(error) : null
   return `HTTP ${error.status} ${reason}${wait === null ? '' : `, retry after ${wait}s`}`
 }
 
@@ -98,9 +112,11 @@ interface GetArcticDataInput<T> {
   path: string
   params: Record<string, string | undefined>
   itemSchema: z.ZodType<T>
+  timeoutMs?: number
+  retries?: number
 }
 
-async function getArcticData<T>({ path, params, itemSchema }: GetArcticDataInput<T>): Promise<T[]> {
+async function getArcticData<T>({ path, params, itemSchema, timeoutMs = arcticTimeoutMs, retries = arcticRetry.retries }: GetArcticDataInput<T>): Promise<T[]> {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) search.set(key, value)
@@ -108,8 +124,8 @@ async function getArcticData<T>({ path, params, itemSchema }: GetArcticDataInput
 
   const envelope = z.object({ data: z.array(itemSchema).nullish(), error: z.string().nullish() })
   const payload = await retry(
-    () => requestJson({ url: `${arcticBase}/${path}?${search}`, headers: { 'User-Agent': arcticUserAgent }, timeoutMs: arcticTimeoutMs, schema: envelope }),
-    arcticRetry,
+    () => requestJson({ url: `${arcticBase}/${path}?${search}`, headers: { 'User-Agent': arcticUserAgent }, timeoutMs, schema: envelope }),
+    { ...arcticRetry, retries },
   )
   if (payload.error) throw new Error(`Arctic Shift: ${payload.error}`)
 

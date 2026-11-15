@@ -54,8 +54,9 @@ export function toSinceEpochSeconds(timeRange: TimeRange): number | undefined {
   return hours === null ? undefined : Math.floor(Date.now() / 1000) - hours * 3600
 }
 
-export function normalizeSubreddit(sub: string): string {
-  return trim(sub.trim().replace(/^r\//i, ''), '/')
+export function toSubredditName(sub: string): string | null {
+  const name = trim(sub.trim().replace(/^\/?r\//i, ''), '/')
+  return /^[A-Za-z0-9_]{2,21}$/.test(name) ? name : null
 }
 
 export function toArcticTitleWords(query: string): string {

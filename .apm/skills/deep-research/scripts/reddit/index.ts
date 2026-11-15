@@ -1,13 +1,6 @@
-export { describeArcticHttpError, enrichFromArchive, fetchViaArctic, listArcticPosts, searchViaArctic } from './arctic'
-export {
-  describeBrowserFailure,
-  fetchViaBrowser,
-  listFlairs,
-  listViaBrowser,
-  RedditPageError,
-  resolveShareLink,
-  type SubredditFlair,
-  searchViaBrowser,
-} from './browser'
-export { ArcticSort, ListingSort, type SearchPostsInput, SearchSort, TimeRange } from './query'
-export { type CommentOptions, CommentSort, type FlairFilter, matchesFlairFilter, PostKind, type PostSummary, type Thread } from './thread'
+export { arcticPostPages, describeArcticHttpError, enrichFromArchive, fetchViaArctic, searchViaArctic } from './arctic'
+export { describeBrowserFailure, fetchViaBrowser, listFlairs, listViaBrowser, resolveShareLink, type SubredditFlair, searchViaBrowser } from './browser'
+export { collectMatching, singlePage } from './collect'
+export { RedditPageError, RedditRefusalError } from './page'
+export { ArcticSort, ListingSort, type SearchPostsInput, SearchSort, TimeRange, toSubredditName } from './query'
+export { type CommentOptions, CommentSort, type FlairFilter, PostKind, type PostSummary, type Thread } from './thread'

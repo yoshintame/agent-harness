@@ -79,12 +79,13 @@ export interface PostSummary {
   subreddit: string
   score: number | null
   num_comments: number | null
-  created_utc: number
+  created_utc: number | null
   edited_utc: number | null
   url: string
   selftext: string
-  author: string
+  author: string | null
   flair: string | null
+  flair_known: boolean
   kind: PostKind | null
   link: string | null
 }
@@ -119,12 +120,13 @@ export function toPostSummary(post: Post): PostSummary {
     subreddit: post.subreddit ?? '',
     score: post.score ?? null,
     num_comments: post.num_comments ?? null,
-    created_utc: post.created_utc ?? 0,
+    created_utc: post.created_utc ?? null,
     edited_utc: toEditedUtc(post),
     url: wwwBase + (post.permalink ?? ''),
     selftext: (post.selftext ?? '').slice(0, 300),
-    author: post.author ?? '',
+    author: post.author ?? null,
     flair: post.link_flair_text ? post.link_flair_text : null,
+    flair_known: true,
     kind,
     link: kind === PostKind.Link ? (post.url ?? null) : null,
   }
@@ -151,6 +153,8 @@ interface MatchesFlairFilterInput {
 }
 
 export function matchesFlairFilter({ post, filter }: MatchesFlairFilterInput): boolean {
+  if (!post.flair_known) return true
+
   const flair = post.flair?.toLowerCase() ?? null
   const included = filter.include.length === 0 ? true : filter.include.some((wanted) => wanted.toLowerCase() === flair)
   const excluded = flair === null ? false : filter.exclude.some((unwanted) => unwanted.toLowerCase() === flair)

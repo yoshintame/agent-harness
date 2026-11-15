@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { type ArgsDef, defineCommand } from 'citty@0.2.2'
-import { compact, take, trimEnd } from 'es-toolkit@1.52.0'
+import { compact, trimEnd } from 'es-toolkit@1.52.0'
 import { match, P } from 'ts-pattern@5.9.0'
 import {
   CommandError,
@@ -9,11 +9,12 @@ import {
   fail,
   HttpError,
   jsonArg,
+  LockBusyError,
   limitArg,
+  parseCount,
   printBlock,
   printComment,
   printEntries,
-  parseCount,
   ReportError,
   readLimit,
   runCli,
@@ -22,29 +23,32 @@ import {
 } from './lib'
 import {
   ArcticSort,
+  arcticPostPages,
   type CommentOptions,
   CommentSort,
+  collectMatching,
   describeArcticHttpError,
   describeBrowserFailure,
   enrichFromArchive,
   type FlairFilter,
   fetchViaArctic,
   fetchViaBrowser,
-  listArcticPosts,
-  listFlairs,
   ListingSort,
+  listFlairs,
   listViaBrowser,
-  matchesFlairFilter,
   type PostSummary,
   RedditPageError,
+  RedditRefusalError,
   resolveShareLink,
   type SearchPostsInput,
   SearchSort,
   type SubredditFlair,
   searchViaArctic,
   searchViaBrowser,
+  singlePage,
   type Thread,
   TimeRange,
+  toSubredditName,
 } from './reddit'
 
 enum Stage {
@@ -55,7 +59,8 @@ enum Stage {
 const browserNote = 'Reddit via the chrome-cdp Chrome session'
 const arcticSearchNote = 'Arctic Shift archive: title-only match, newest first regardless of --sort, scores are archive snapshots'
 const arcticFetchNote = 'Arctic Shift archive, scores are archive snapshots'
-const maxWidenedLimit = 100
+const maxSearchScrollTarget = 90
+const maxArcticPageSize = 100
 const noArchiveHint = 'No archive fallback without --sub: Arctic Shift title search is subreddit-scoped, and its full-text search times out.'
 
 interface StageFailure {
@@ -95,8 +100,8 @@ interface AllStagesFailedErrorInput {
 }
 
 const flairArgs = {
-  flair: { type: 'string', description: 'Keep only posts with these flairs (comma-separated, case-insensitive)' },
-  'exclude-flair': { type: 'string', description: 'Drop posts with these flairs, e.g. Meme' },
+  flair: { type: 'string', description: 'Keep only posts with these flairs (comma-separated, case-insensitive, exact names)' },
+  'exclude-flair': { type: 'string', description: 'Drop posts with these flairs (comma-separated, exact names)' },
 } as const satisfies ArgsDef
 
 class AllStagesFailedError extends ReportError {
@@ -118,11 +123,11 @@ const search = defineCommand({
   },
   async run({ args }) {
     const filter = parseFlairFilter({ include: args.flair, exclude: args['exclude-flair'] })
-    const limit = readLimit(args.limit)
-    const result = await searchPosts({ query: args.query, sub: args.sub, sort: args.sort, timeRange: args.time, limit: widenForFilter({ limit, filter }) })
+    const sub = args.sub === undefined ? undefined : readSubreddit(args.sub)
+    const result = await searchPosts({ input: { query: args.query, sub, sort: args.sort, timeRange: args.time, limit: readLimit(args.limit) }, filter })
     reportFallback(result)
-    const posts = await addArchiveDetails(result)
-    emit({ value: take(posts.filter((post) => matchesFlairFilter({ post, filter })), limit), json: args.json, printMarkdown: printPosts })
+    reportUnknownFlairs({ posts: result.value, filter })
+    emit({ value: result.value, json: args.json, printMarkdown: printPosts })
   },
 })
 
@@ -138,12 +143,15 @@ const top = defineCommand({
   },
   async run({ args }) {
     const posts = await listViaBrowser({
-      sub: args.subreddit,
+      sub: readSubreddit(args.subreddit),
       sort: args.sort,
       timeRange: args.time,
       limit: readLimit(args.limit),
       filter: parseFlairFilter({ include: args.flair, exclude: args['exclude-flair'] }),
-    }).catch((error: unknown) => fail(`search-reddit top: ${describeFailure(error)}\nWithout Reddit, \`search-reddit arctic <sub>\` lists the subreddit chronologically from the archive.`))
+    }).catch((error: unknown) => {
+      const hint = error instanceof RedditPageError ? '' : '\nWithout Reddit, `search-reddit arctic <sub>` lists the subreddit chronologically from the archive.'
+      return fail(`search-reddit top: ${describeFailure(error)}${hint}`)
+    })
     emit({ value: posts, json: args.json, printMarkdown: printPosts })
   },
 })
@@ -181,7 +189,7 @@ const flairsCommand = defineCommand({
     json: jsonArg,
   },
   async run({ args }) {
-    const flairs = await listFlairs(args.subreddit).catch((error: unknown) => fail(`search-reddit flairs: ${describeFailure(error)}`))
+    const flairs = await listFlairs(readSubreddit(args.subreddit)).catch((error: unknown) => fail(`search-reddit flairs: ${describeFailure(error)}`))
     emit({ value: flairs, json: args.json, printMarkdown: printFlairs })
   },
 })
@@ -199,17 +207,15 @@ const arcticCommand = defineCommand({
     json: jsonArg,
   },
   async run({ args }) {
-    const filter = parseFlairFilter({ include: args.flair, exclude: args['exclude-flair'] })
     const limit = readLimit(args.limit)
-    const posts = await listArcticPosts({
-      subreddit: args.subreddit,
-      title: args.title,
-      after: args.after,
-      before: args.before,
-      sort: args.sort,
-      limit: widenForFilter({ limit, filter }),
+    const pages = arcticPostPages({ subreddit: readSubreddit(args.subreddit), title: args.title, after: args.after, before: args.before, sort: args.sort })
+    const posts = await collectMatching({
+      pages,
+      filter: parseFlairFilter({ include: args.flair, exclude: args['exclude-flair'] }),
+      limit,
+      maxPages: Math.ceil(limit / maxArcticPageSize) + 4,
     }).catch((error: unknown) => fail(`search-reddit arctic: ${describeFailure(error)}`))
-    emit({ value: take(posts.filter((post) => matchesFlairFilter({ post, filter })), limit), json: args.json, printMarkdown: printPosts })
+    emit({ value: posts, json: args.json, printMarkdown: printPosts })
   },
 })
 
@@ -221,12 +227,30 @@ const main = defineCommand({
   subCommands: { search, top, flairs: flairsCommand, fetch: fetchCommand, arctic: arcticCommand },
 })
 
-function searchPosts(input: SearchPostsInput): Promise<StageResult<PostSummary[]>> {
+interface SearchPostsInputWithFilter {
+  input: SearchPostsInput
+  filter: FlairFilter
+}
+
+function searchPosts({ input, filter }: SearchPostsInputWithFilter): Promise<StageResult<PostSummary[]>> {
   const { sub } = input
-  const browser = { stage: Stage.Browser, note: browserNote, run: () => searchViaBrowser(input) }
-  const arctic = sub === undefined ? null : { stage: Stage.Arctic, note: arcticSearchNote, run: () => searchViaArctic({ ...input, sub }) }
+  const filtering = filter.include.length + filter.exclude.length > 0
+  const scrollTarget = filtering ? Math.max(input.limit, Math.min(input.limit * 3, maxSearchScrollTarget)) : input.limit
+  const browser = {
+    stage: Stage.Browser,
+    note: browserNote,
+    run: async () => {
+      const found = await searchViaBrowser({ ...input, limit: scrollTarget })
+      return collectMatching({ pages: singlePage(addArchiveDetails(found)), filter, limit: input.limit })
+    },
+  }
+  const arctic = sub === undefined ? null : { stage: Stage.Arctic, note: arcticSearchNote, run: () => searchViaArctic({ ...input, sub, filter }) }
 
   return runStages({ operation: 'search', attempts: arctic === null ? [browser] : [browser, arctic], hint: arctic === null ? noArchiveHint : undefined })
+}
+
+function readSubreddit(value: string): string {
+  return toSubredditName(value) ?? fail(`not a subreddit name: ${JSON.stringify(value)} (expected 2-21 letters, digits or underscores)`)
 }
 
 interface ParseFlairFilterInput {
@@ -242,23 +266,24 @@ function splitList(value: string | undefined): string[] {
   return compact((value ?? '').split(',').map((item) => item.trim()))
 }
 
-interface WidenForFilterInput {
-  limit: number
+async function addArchiveDetails(posts: PostSummary[]): Promise<PostSummary[]> {
+  return enrichFromArchive(posts).catch((error: unknown) => {
+    process.stderr.write(`note: flair and post text unavailable, the archive did not answer: ${describeFailure(error)}\n`)
+    return posts
+  })
+}
+
+interface ReportUnknownFlairsInput {
+  posts: PostSummary[]
   filter: FlairFilter
 }
 
-function widenForFilter({ limit, filter }: WidenForFilterInput): number {
+function reportUnknownFlairs({ posts, filter }: ReportUnknownFlairsInput): void {
+  const unknown = posts.filter((post) => !post.flair_known).length
   const filtering = filter.include.length + filter.exclude.length > 0
-  return filtering ? Math.min(limit * 3, maxWidenedLimit) : limit
-}
-
-async function addArchiveDetails({ value, stage }: StageResult<PostSummary[]>): Promise<PostSummary[]> {
-  if (stage === Stage.Arctic) return value
-
-  return enrichFromArchive(value).catch((error: unknown) => {
-    process.stderr.write(`note: flair and post text unavailable: ${describeFailure(error)}\n`)
-    return value
-  })
+  if ([filtering, unknown > 0].every(Boolean)) {
+    process.stderr.write(`note: ${unknown} of ${posts.length} posts are not in the archive yet, so their flair is unknown and they passed the flair filter unchecked (flair?)\n`)
+  }
 }
 
 interface FetchThreadInput {
@@ -314,7 +339,9 @@ function formatFailure({ stage, reason }: StageFailure): string {
 
 function describeFailure(error: unknown): string {
   return match(error)
+    .with(P.instanceOf(RedditRefusalError), (failure) => failure.message)
     .with(P.instanceOf(RedditPageError), (failure) => failure.message)
+    .with(P.instanceOf(LockBusyError), describeBrowserFailure)
     .with(P.intersection(P.instanceOf(CommandError), { command: 'chrome-devtools' }), describeBrowserFailure)
     .with(P.instanceOf(HttpError), describeArcticHttpError)
     .otherwise(describeError)
@@ -356,9 +383,10 @@ function printPosts(posts: PostSummary[]): void {
     entries: posts,
     emptyMessage: 'No results.',
     toBlock: (post) => {
-      const date = post.created_utc > 0 ? describeDates({ createdUtc: post.created_utc, editedUtc: post.edited_utc }) : null
+      const date = post.created_utc === null ? null : describeDates({ createdUtc: post.created_utc, editedUtc: post.edited_utc })
       const subreddit = sharedSubreddit ? null : `r/${post.subreddit}`
-      const labels = compact([date, subreddit, post.flair, post.kind]).join(' | ')
+      const flair = post.flair_known ? post.flair : 'flair?'
+      const labels = compact([date, subreddit, flair, post.kind]).join(' | ')
       return [
         `[${formatScore({ score: post.score, width: 5 })} | ${post.num_comments ?? '?'} cmts | ${labels}] ${post.title}`,
         `  ${post.url}`,
