@@ -79,6 +79,7 @@ export async function enrichFromArchive(posts: PostSummary[]): Promise<PostSumma
       ? post
       : {
           ...post,
+          edited_utc: archivedPost.edited_utc,
           flair: archivedPost.flair,
           kind: archivedPost.kind,
           link: archivedPost.link,

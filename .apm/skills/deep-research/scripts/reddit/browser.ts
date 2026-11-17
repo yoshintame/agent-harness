@@ -461,6 +461,7 @@ function toSearchSummary(unit: ResultUnit): PostSummary {
   const createdMs = unit.created ? Date.parse(unit.created) : Number.NaN
   return {
     id: unit.permalink.match(/\/comments\/([a-z0-9]+)/)?.[1] ?? '',
+    edited_utc: null,
     flair: null,
     kind: null,
     link: null,

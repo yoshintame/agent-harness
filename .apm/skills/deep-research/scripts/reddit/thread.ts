@@ -41,6 +41,7 @@ export const Post = z.object({
   score: z.number().nullish(),
   num_comments: z.number().nullish(),
   created_utc: z.number().nullish(),
+  edited: z.union([z.number(), z.boolean()]).nullish(),
   permalink: z.string().nullish(),
   selftext: z.string().nullish(),
   author: z.string().nullish(),
@@ -79,6 +80,7 @@ export interface PostSummary {
   score: number | null
   num_comments: number | null
   created_utc: number
+  edited_utc: number | null
   url: string
   selftext: string
   author: string
@@ -90,6 +92,7 @@ export interface PostSummary {
 export interface Comment {
   author: string | null
   score: number | null
+  created_utc: number | null
   body: string
   depth: number
 }
@@ -99,6 +102,8 @@ export interface Thread {
   subreddit: string | null
   score: number | null
   num_comments: number | null
+  created_utc: number | null
+  edited_utc: number | null
   url: string
   author: string | null
   selftext: string
@@ -115,6 +120,7 @@ export function toPostSummary(post: Post): PostSummary {
     score: post.score ?? null,
     num_comments: post.num_comments ?? null,
     created_utc: post.created_utc ?? 0,
+    edited_utc: toEditedUtc(post),
     url: wwwBase + (post.permalink ?? ''),
     selftext: (post.selftext ?? '').slice(0, 300),
     author: post.author ?? '',
@@ -122,6 +128,12 @@ export function toPostSummary(post: Post): PostSummary {
     kind,
     link: kind === PostKind.Link ? (post.url ?? null) : null,
   }
+}
+
+function toEditedUtc(post: Post): number | null {
+  return match(post.edited)
+    .with(P.number, (editedAt) => editedAt)
+    .otherwise(() => null)
 }
 
 function toPostKind(post: Post): PostKind {
@@ -158,6 +170,8 @@ export function toThread({ post, comments, postId, sort }: ToThreadInput): Threa
     subreddit: post.subreddit ?? null,
     score: post.score ?? null,
     num_comments: post.num_comments ?? null,
+    created_utc: post.created_utc ?? null,
+    edited_utc: toEditedUtc(post),
     url: wwwBase + (post.permalink ?? `/comments/${postId}/`),
     author: post.author ?? null,
     selftext: post.selftext ?? '',
@@ -187,7 +201,7 @@ function extractLevel({ items, depth, options, serverSorted }: ExtractLevelInput
   const ranked = rankComments({ comments, sort: options.sort, serverSorted })
 
   return take(ranked, options.perLevel).flatMap((comment) => [
-    { author: comment.author ?? null, score: comment.score ?? null, body: comment.body ?? '', depth },
+    { author: comment.author ?? null, score: comment.score ?? null, created_utc: comment.created_utc ?? null, body: comment.body ?? '', depth },
     ...extractLevel({ items: childItems(comment), depth: depth + 1, options, serverSorted }),
   ])
 }

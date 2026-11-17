@@ -348,11 +348,17 @@ function formatScore({ score, width }: FormatScoreInput): string {
 }
 
 function printPosts(posts: PostSummary[]): void {
+  const subreddits = new Set(posts.map((post) => post.subreddit))
+  const sharedSubreddit = subreddits.size === 1 ? [...subreddits][0] : undefined
+  if (sharedSubreddit) printBlock([`## r/${sharedSubreddit}`])
+
   printEntries({
     entries: posts,
     emptyMessage: 'No results.',
     toBlock: (post) => {
-      const labels = compact([`r/${post.subreddit}`, post.flair, post.kind]).join(' | ')
+      const date = post.created_utc > 0 ? describeDates({ createdUtc: post.created_utc, editedUtc: post.edited_utc }) : null
+      const subreddit = sharedSubreddit ? null : `r/${post.subreddit}`
+      const labels = compact([date, subreddit, post.flair, post.kind]).join(' | ')
       return [
         `[${formatScore({ score: post.score, width: 5 })} | ${post.num_comments ?? '?'} cmts | ${labels}] ${post.title}`,
         `  ${post.url}`,
@@ -361,6 +367,22 @@ function printPosts(posts: PostSummary[]): void {
       ]
     },
   })
+}
+
+interface DescribeDatesInput {
+  createdUtc: number
+  editedUtc: number | null
+}
+
+function describeDates({ createdUtc, editedUtc }: DescribeDatesInput): string {
+  const created = toIsoDate(createdUtc)
+  const edited = editedUtc === null ? created : toIsoDate(editedUtc)
+  return edited === created ? created : `${created}, edited ${edited}`
+}
+
+function toIsoDate(epochSeconds: number): string {
+  const date = new Date(epochSeconds * 1000)
+  return Number.isNaN(date.getTime()) ? '?' : date.toISOString().slice(0, 10)
 }
 
 function printFlairs(flairs: SubredditFlair[]): void {
@@ -372,7 +394,13 @@ function printFlairs(flairs: SubredditFlair[]): void {
 function printThread(thread: Thread): void {
   printBlock([
     `# ${thread.title ?? ''}`,
-    `r/${thread.subreddit ?? ''} · ${thread.score ?? '?'} pts · ${thread.num_comments ?? '?'} comments · by u/${thread.author ?? ''}`,
+    compact([
+      `r/${thread.subreddit ?? ''}`,
+      `${thread.score ?? '?'} pts`,
+      `${thread.num_comments ?? '?'} comments`,
+      `by u/${thread.author ?? ''}`,
+      thread.created_utc === null ? null : describeDates({ createdUtc: thread.created_utc, editedUtc: thread.edited_utc }),
+    ]).join(' · '),
     thread.url,
   ])
   if (thread.selftext) printBlock([thread.selftext])
@@ -380,7 +408,8 @@ function printThread(thread: Thread): void {
 
   printBlock([`## Comments (${thread.top_comments.length}, sorted by ${thread.comment_sort})`])
   for (const comment of thread.top_comments) {
-    printComment({ depth: comment.depth, header: `[${formatScore({ score: comment.score, width: 4 })}] u/${comment.author ?? ''}:`, body: comment.body })
+    const date = comment.created_utc === null ? '' : ` | ${toIsoDate(comment.created_utc)}`
+    printComment({ depth: comment.depth, header: `[${formatScore({ score: comment.score, width: 4 })}${date}] u/${comment.author ?? ''}:`, body: comment.body })
   }
 }
 
