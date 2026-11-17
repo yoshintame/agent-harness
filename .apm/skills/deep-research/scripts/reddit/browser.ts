@@ -4,14 +4,28 @@ import { type CommandError, evaluateInPage, LockBusyError } from '../lib'
 import { collectMatching } from './collect'
 import { withHumanFix } from './human-fix'
 import { PageState, RedditApiError, RedditPageError, readRedditJson, resultLinkSelector, toPageError } from './page'
-import { type ListingSort, type SearchPostsInput, type TimeRange } from './query'
+import { ListingSort, type SearchPostsInput, type TimeRange } from './query'
 import { PageMovedError, withRedditPage } from './session'
-import { type CommentOptions, CommentSort, extractComments, type FlairFilter, Post, type PostSummary, type Thread, ThreadResponse, toPostSummary, toThread, wwwBase } from './thread'
+import {
+  type CommentOptions,
+  CommentSort,
+  extractComments,
+  type FlairFilter,
+  Post,
+  PostKind,
+  type PostSummary,
+  type Thread,
+  ThreadResponse,
+  toPostSummary,
+  toThread,
+  wwwBase,
+} from './thread'
 
 const maxScrolls = 12
 const scrollSettleMs = 1500
 const maxApiComments = 500
 const maxListingPageSize = 100
+const missingCommunityPhrase = "couldn't find that community"
 
 const commentSortParams = {
   [CommentSort.Top]: 'top',
@@ -90,6 +104,51 @@ const scrollScript = `() => {
 
 const resultCountScript = `() => document.querySelectorAll('${resultLinkSelector}').length`
 
+const FeedPost = z.object({
+  id: z.string().regex(/^t3_[a-z0-9]+$/),
+  permalink: z.string().regex(/^\/r\/[^/]+\/comments\/[a-z0-9]+/),
+  title: z.string().min(1),
+  subreddit: z.string().nullish(),
+  author: z.string().nullish(),
+  score: z.number().nullish(),
+  comments: z.number().nullish(),
+  created: z.string().nullish(),
+  type: z.string().nullish(),
+  href: z.string().nullish(),
+  flair: z.string().nullish(),
+  body: z.string().nullish(),
+})
+type FeedPost = z.infer<typeof FeedPost>
+
+const FeedSnapshot = PageState.extend({ feed: z.boolean(), posts: z.array(z.unknown()) })
+type FeedSnapshot = z.infer<typeof FeedSnapshot>
+
+const feedSnapshotScript = `() => {
+  const numberAttribute = (post, name) => {
+    const value = Number(post.getAttribute(name))
+    return post.hasAttribute(name) && Number.isFinite(value) ? value : null
+  }
+  return {
+    title: document.title,
+    text: document.body.innerText.slice(0, 300),
+    feed: document.querySelector('shreddit-feed') !== null,
+    posts: [...document.querySelectorAll('shreddit-post')].map((post) => ({
+      id: post.getAttribute('id') ?? '',
+      permalink: post.getAttribute('permalink') ?? '',
+      title: post.getAttribute('post-title') ?? '',
+      subreddit: post.getAttribute('subreddit-name'),
+      author: post.getAttribute('author'),
+      score: numberAttribute(post, 'score'),
+      comments: numberAttribute(post, 'comment-count'),
+      created: post.getAttribute('created-timestamp'),
+      type: post.getAttribute('post-type'),
+      href: post.getAttribute('content-href'),
+      flair: post.querySelector('shreddit-post-flair')?.innerText.trim() || null,
+      body: post.querySelector('[slot=text-body]')?.innerText.trim() ?? null,
+    })),
+  }
+}`
+
 const sharedPageScript = '() => ({ title: document.title, text: document.body.innerText.slice(0, 300), path: location.pathname })'
 
 export function searchViaBrowser(input: SearchPostsInput): Promise<PostSummary[]> {
@@ -147,7 +206,85 @@ export interface ListSubredditInput {
 }
 
 export function listViaBrowser(input: ListSubredditInput): Promise<PostSummary[]> {
-  return withHumanFix(() => collectMatching({ pages: listingPages({ input, after: null }), filter: input.filter, limit: input.limit }))
+  return withHumanFix(() =>
+    match(input.sort)
+      .with(P.union(ListingSort.Top, ListingSort.Controversial), () =>
+        collectMatching({ pages: listingPages({ input, after: null }), filter: input.filter, limit: input.limit }),
+      )
+      .with(P.union(ListingSort.New, ListingSort.Hot), () => readSubredditFeed(input))
+      .exhaustive(),
+  )
+}
+
+function readSubredditFeed(input: ListSubredditInput): Promise<PostSummary[]> {
+  return withRedditPage({
+    url: `${wwwBase}/r/${input.sub}/${input.sort}/`,
+    expectInUrl: `/r/${input.sub}/`,
+    read: (pageId) =>
+      collectMatching({
+        pages: feedPages({ pageId, sub: input.sub, seenIds: new Set(), scrollsLeft: maxScrolls, stalled: false }),
+        filter: input.filter,
+        limit: input.limit,
+        maxPages: maxScrolls + 1,
+      }),
+  }).catch((error: unknown) => {
+    throw toMissingSubredditError({ error, sub: input.sub })
+  })
+}
+
+interface FeedPagesInput {
+  pageId: number
+  sub: string
+  seenIds: ReadonlySet<string>
+  scrollsLeft: number
+  stalled: boolean
+}
+
+async function* feedPages({ pageId, sub, seenIds, scrollsLeft, stalled }: FeedPagesInput): AsyncGenerator<PostSummary[]> {
+  const snapshot = await evaluateInPage({ pageId, source: feedSnapshotScript, schema: FeedSnapshot })
+  const visible = snapshot.posts.flatMap((post) => {
+    const parsed = FeedPost.safeParse(post)
+    return parsed.success ? [toFeedSummary(parsed.data)] : []
+  })
+  if (seenIds.size === 0) assertFeedReadable({ snapshot, visible, sub })
+
+  const fresh = visible.filter((post) => !seenIds.has(post.id))
+  if ([fresh.length === 0, stalled || seenIds.size === 0].every(Boolean)) return
+
+  if (fresh.length > 0) yield fresh
+  if (scrollsLeft === 0) return
+
+  await evaluateInPage({ pageId, source: scrollScript, schema: z.number() })
+  await Bun.sleep(scrollSettleMs)
+
+  yield* feedPages({
+    pageId,
+    sub,
+    seenIds: new Set([...seenIds, ...fresh.map((post) => post.id)]),
+    scrollsLeft: scrollsLeft - 1,
+    stalled: fresh.length === 0,
+  })
+}
+
+interface AssertFeedReadableInput {
+  snapshot: FeedSnapshot
+  visible: PostSummary[]
+  sub: string
+}
+
+function assertFeedReadable({ snapshot, visible, sub }: AssertFeedReadableInput): void {
+  match({ cards: snapshot.posts.length, parsed: visible.length, feed: snapshot.feed, missing: snapshot.text.includes(missingCommunityPhrase) })
+    .with({ parsed: P.number.gt(0) }, () => undefined)
+    .with({ cards: P.number.gt(0) }, () => {
+      throw new RedditPageError('Reddit feed cards changed shape: no shreddit-post had an id, a title and a /r/<sub>/comments/ link')
+    })
+    .with({ missing: true }, () => {
+      throw new RedditPageError(`r/${sub} does not exist`)
+    })
+    .with({ feed: true }, () => undefined)
+    .otherwise(() => {
+      throw toPageError(snapshot)
+    })
 }
 
 interface ListingPagesInput {
@@ -249,6 +386,37 @@ function browserSearchUrl({ query, sub, sort, timeRange }: SearchPostsInput): st
   if (sub) params.set('restrict_sr', '1')
 
   return sub ? `${wwwBase}/r/${sub}/search/?${params}` : `${wwwBase}/search/?${params}`
+}
+
+function toFeedSummary(post: FeedPost): PostSummary {
+  const createdMs = post.created ? Date.parse(post.created) : Number.NaN
+  const kind = toFeedPostKind(post.type)
+  return {
+    id: post.id.replace(/^t3_/, ''),
+    title: post.title,
+    subreddit: post.subreddit ?? post.permalink.split('/')[2] ?? '',
+    score: post.score ?? null,
+    num_comments: post.comments ?? null,
+    created_utc: Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : null,
+    edited_utc: null,
+    url: wwwBase + post.permalink,
+    selftext: (post.body ?? '').slice(0, 300),
+    author: post.author ?? null,
+    flair: post.flair ?? null,
+    flair_known: true,
+    kind,
+    link: kind === PostKind.Link ? (post.href ?? null) : null,
+  }
+}
+
+function toFeedPostKind(type: string | null | undefined): PostKind | null {
+  return match(type)
+    .with('text', () => PostKind.Text)
+    .with('image', () => PostKind.Image)
+    .with(P.union('gallery', 'multi_media'), () => PostKind.Gallery)
+    .with('video', () => PostKind.Video)
+    .with(P.union('link', 'crosspost'), () => PostKind.Link)
+    .otherwise(() => null)
 }
 
 function toSearchSummary(unit: ResultUnit): PostSummary {

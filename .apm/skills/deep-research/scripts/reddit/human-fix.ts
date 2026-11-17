@@ -4,7 +4,7 @@ import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 import { alertUser, closePage, closePageNow, getChromePid, isLockHeld, LockBusyError, openPage, registerCleanup, withFileLock } from '../lib'
 import { cachePaths } from './cache'
-import { HumanRefusal, RedditPageError, RedditRefusalError, readRedditJson } from './page'
+import { HumanRefusal, RedditEndpointClosedError, RedditRefusalError, readRedditJson } from './page'
 import { wwwBase } from './thread'
 
 const humanWaitMs = 180_000
@@ -90,7 +90,7 @@ async function recoverFromRefusal<T>({ refused, attempt }: RecoverFromRefusalInp
 async function retryWithWorkingSession<T>(attempt: () => Promise<T>): Promise<T> {
   return attempt().catch((error: unknown) => {
     throw error instanceof RedditRefusalError
-      ? new RedditPageError('Reddit refused this page twice while the session works: the subreddit or post may be private, banned or missing')
+      ? new RedditEndpointClosedError('Reddit refused this address twice while the signed-in session works: Reddit closes this endpoint to the agent Chrome, or the subreddit or post is private, banned or missing')
       : error
   })
 }

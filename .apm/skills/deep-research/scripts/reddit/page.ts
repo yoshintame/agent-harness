@@ -28,6 +28,8 @@ export class RedditRefusalError extends Error {
 
 export class RedditPageError extends Error {}
 
+export class RedditEndpointClosedError extends RedditPageError {}
+
 export class RedditApiError extends RedditPageError {
   public readonly status: number
 

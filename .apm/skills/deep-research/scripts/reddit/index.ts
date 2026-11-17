@@ -1,6 +1,6 @@
 export { arcticPostPages, describeArcticHttpError, enrichFromArchive, fetchViaArctic, searchViaArctic } from './arctic'
 export { describeBrowserFailure, fetchViaBrowser, listFlairs, listViaBrowser, resolveShareLink, type SubredditFlair, searchViaBrowser } from './browser'
 export { collectMatching, singlePage } from './collect'
-export { RedditPageError, RedditRefusalError } from './page'
+export { RedditEndpointClosedError, RedditPageError, RedditRefusalError } from './page'
 export { ArcticSort, ListingSort, type SearchPostsInput, SearchSort, TimeRange, toSubredditName } from './query'
 export { type CommentOptions, CommentSort, type FlairFilter, PostKind, type PostSummary, type Thread } from './thread'

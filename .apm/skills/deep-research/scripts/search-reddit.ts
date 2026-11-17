@@ -37,6 +37,7 @@ import {
   listFlairs,
   listViaBrowser,
   type PostSummary,
+  RedditEndpointClosedError,
   RedditPageError,
   RedditRefusalError,
   resolveShareLink,
@@ -57,7 +58,8 @@ enum Stage {
 }
 
 const browserNote = 'Reddit via the chrome-cdp Chrome session'
-const arcticSearchNote = 'Arctic Shift archive: title-only match, newest first regardless of --sort, scores are archive snapshots'
+const arcticListingHint = '\nWithout Reddit, `search-reddit arctic <sub>` lists the subreddit chronologically from the archive.'
+const arcticSearchNote ='Arctic Shift archive: title-only match, newest first regardless of --sort, scores are archive snapshots'
 const arcticFetchNote = 'Arctic Shift archive, scores are archive snapshots'
 const maxSearchScrollTarget = 90
 const maxArcticPageSize = 100
@@ -132,7 +134,7 @@ const search = defineCommand({
 })
 
 const top = defineCommand({
-  meta: { name: 'top', description: "List a subreddit's own tabs (top, hot, new, rising, controversial) without a query" },
+  meta: { name: 'top', description: "List a subreddit's own tabs (top, hot, new, controversial) without a query" },
   args: {
     subreddit: { type: 'positional', required: true, description: 'Subreddit name (e.g. StremioAddons)' },
     sort: { type: 'enum', options: Object.values(ListingSort), default: ListingSort.Top, description: 'Subreddit tab' },
@@ -149,7 +151,10 @@ const top = defineCommand({
       limit: readLimit(args.limit),
       filter: parseFlairFilter({ include: args.flair, exclude: args['exclude-flair'] }),
     }).catch((error: unknown) => {
-      const hint = error instanceof RedditPageError ? '' : '\nWithout Reddit, `search-reddit arctic <sub>` lists the subreddit chronologically from the archive.'
+      const hint = match(error)
+        .with(P.instanceOf(RedditEndpointClosedError), () => arcticListingHint)
+        .with(P.instanceOf(RedditPageError), () => '')
+        .otherwise(() => arcticListingHint)
       return fail(`search-reddit top: ${describeFailure(error)}${hint}`)
     })
     emit({ value: posts, json: args.json, printMarkdown: printPosts })
