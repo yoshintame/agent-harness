@@ -3,7 +3,7 @@ import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 import { HttpError, requestJson } from '../lib'
 import { ArcticSort, normalizeSubreddit, type SearchPostsInput, toArcticTitleWords, toSinceEpochSeconds } from './query'
-import { extractComments, Post, type PostSummary, type Thread, toPostSummary, toThread } from './thread'
+import { type CommentOptions, extractComments, Post, type PostSummary, type Thread, toPostSummary, toThread } from './thread'
 
 const arcticBase = 'https://arctic-shift.photon-reddit.com/api'
 const arcticUserAgent = 'search-reddit/2.0 (personal research CLI)'
@@ -36,12 +36,17 @@ export async function searchViaArctic({ query, sub, timeRange, limit }: SearchVi
   return listArcticPosts({ subreddit: sub, title: words, after: toSinceEpochSeconds(timeRange)?.toString(), before: undefined, sort: ArcticSort.Desc, limit })
 }
 
-export async function fetchViaArctic(postId: string): Promise<Thread> {
+interface FetchViaArcticInput {
+  postId: string
+  options: CommentOptions
+}
+
+export async function fetchViaArctic({ postId, options }: FetchViaArcticInput): Promise<Thread> {
   const [post] = await getArcticData({ path: 'posts/ids', params: { ids: postId }, itemSchema: Post })
   if (post === undefined) throw new Error(`post ${postId} is not in the archive`)
 
-  const tree = await getArcticData({ path: 'comments/tree', params: { link_id: postId, limit: '500' }, itemSchema: z.unknown() })
-  return toThread({ post, comments: extractComments({ items: tree, depth: 0, byScore: true }), postId })
+  const tree = options.perLevel === 0 ? [] : await getArcticData({ path: 'comments/tree', params: { link_id: postId, limit: '500' }, itemSchema: z.unknown() })
+  return toThread({ post, comments: extractComments({ items: tree, options, serverSorted: false }), postId, sort: options.sort })
 }
 
 interface ListArcticPostsInput {

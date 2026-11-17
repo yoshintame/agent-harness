@@ -1,11 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { match, P } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
-import { closePage, CommandError, evaluateInPage, openPage } from '../lib'
+import { alertUser, closePage, CommandError, evaluateInPage, getChromePid, openPage } from '../lib'
 import { normalizeSubreddit, type SearchPostsInput } from './query'
-import { extractComments, type PostSummary, type Thread, ThreadResponse, toThread, wwwBase } from './thread'
+import { type CommentOptions, CommentSort, extractComments, type PostSummary, type Thread, ThreadResponse, toThread, wwwBase } from './thread'
 
 const minRequestGapMs = 5500
 const maxScrolls = 12
@@ -13,14 +13,53 @@ const scrollSettleMs = 1500
 const lockRetryMs = 100
 const lockAttempts = 100
 const staleLockMs = 30_000
+const humanWaitMs = 180_000
+const humanPollMs = 5000
+const humanGiveUpCooldownMs = 600_000
+const maxApiComments = 500
 const cacheDir = join(z.string().min(1).catch(join(homedir(), '.cache')).parse(process.env.XDG_CACHE_HOME ?? ''), 'search-reddit')
 const lastSlotPath = join(cacheDir, 'last-request')
-const lockPath = join(cacheDir, 'request.lock')
+const requestLockPath = join(cacheDir, 'request.lock')
+const humanLockPath = join(cacheDir, 'human.lock')
+const humanGaveUpPath = join(cacheDir, 'human-gave-up')
 const blockedPhrase = 'blocked by network security'
 const challengePhrase = 'Prove your humanity'
 const resultLinkSelector = 'a[data-testid=post-title]'
+const signedInSelector = '#expand-user-drawer-button, faceplate-dropdown-menu'
 
-export class RedditPageError extends Error {}
+export enum PageRefusal {
+  Blocked = 'blocked',
+  Challenge = 'challenge',
+  Unexpected = 'unexpected',
+}
+
+interface RedditPageErrorInput {
+  refusal: PageRefusal
+  detail: string
+}
+
+export class RedditPageError extends Error {
+  public readonly refusal: PageRefusal
+
+  public constructor({ refusal, detail }: RedditPageErrorInput) {
+    super(detail)
+    this.refusal = refusal
+  }
+}
+
+const commentSortParams = {
+  [CommentSort.Top]: 'top',
+  [CommentSort.Best]: 'confidence',
+  [CommentSort.New]: 'new',
+  [CommentSort.Old]: 'old',
+  [CommentSort.Controversial]: 'controversial',
+  [CommentSort.Qa]: 'qa',
+} as const satisfies Record<CommentSort, string>
+
+const humanActionsByRefusal = {
+  [PageRefusal.Blocked]: { url: `${wwwBase}/login/`, message: 'Reddit signed the agent Chrome out: sign in in the window that just opened' },
+  [PageRefusal.Challenge]: { url: `${wwwBase}/`, message: 'Reddit asks for a human check: pass it in the window that just opened' },
+} as const
 
 const PageState = z.object({ title: z.string(), text: z.string() })
 type PageState = z.infer<typeof PageState>
@@ -55,6 +94,7 @@ type ResultUnit = z.infer<typeof ResultUnit>
 
 const JsonSnapshot = PageState.extend({ data: z.unknown() })
 const NotFoundBody = z.object({ error: z.literal(404) })
+const HumanCheckState = PageState.extend({ signedIn: z.boolean() })
 
 const searchSnapshotScript = `() => {
   const numberLabelled = (card, label) => {
@@ -99,58 +139,80 @@ const jsonSnapshotScript = `() => {
   return { title: document.title, text: document.body.innerText.slice(0, 300), data }
 }`
 
-export async function searchViaBrowser(input: SearchPostsInput): Promise<PostSummary[]> {
-  const snapshot = await withRedditPage({
-    url: browserSearchUrl(input),
-    read: async (pageId) => {
-      const initialCount = await evaluateInPage({ pageId, source: resultCountScript, schema: z.number() })
-      await loadMoreResults({ pageId, limit: input.limit, seen: initialCount, scrollsLeft: maxScrolls })
-      return evaluateInPage({ pageId, source: searchSnapshotScript, schema: SearchSnapshot })
-    },
-  })
+const humanCheckScript = `() => ({
+  title: document.title,
+  text: document.body.innerText.slice(0, 300),
+  signedIn: document.querySelector('${signedInSelector}') !== null,
+})`
 
-  const units = snapshot.units.flatMap((unit) => {
-    const parsed = ResultUnit.safeParse(unit)
-    return parsed.success ? [parsed.data] : []
-  })
-
-  return match({ found: snapshot.units.length, valid: units.length, noResults: snapshot.noResults })
-    .with({ valid: P.number.gt(0) }, () => units.slice(0, input.limit).map(toSearchSummary))
-    .with({ found: P.number.gt(0) }, () => {
-      throw new RedditPageError('Reddit result cards changed shape: no card had a title and a /r/<sub>/comments/ link')
-    })
-    .with({ noResults: true }, () => [])
-    .otherwise(() => {
-      throw toPageError(snapshot)
-    })
-}
-
-export async function fetchViaBrowser(postId: string): Promise<Thread> {
-  const url = `${wwwBase}/comments/${postId}/.json?limit=100&sort=top&raw_json=1`
-  const snapshot = await withRedditPage({ url, read: (pageId) => evaluateInPage({ pageId, source: jsonSnapshotScript, schema: JsonSnapshot }) })
-
-  return match(snapshot.data)
-    .with(P.nullish, () => {
-      throw toPageError(snapshot)
-    })
-    .when(
-      (data) => NotFoundBody.safeParse(data).success,
-      () => {
-        throw new RedditPageError(`post ${postId} not found on Reddit`)
+export function searchViaBrowser(input: SearchPostsInput): Promise<PostSummary[]> {
+  return withHumanFix(async () => {
+    const snapshot = await withRedditPage({
+      url: browserSearchUrl(input),
+      read: async (pageId) => {
+        const initialCount = await evaluateInPage({ pageId, source: resultCountScript, schema: z.number() })
+        await loadMoreResults({ pageId, limit: input.limit, seen: initialCount, scrollsLeft: maxScrolls })
+        return evaluateInPage({ pageId, source: searchSnapshotScript, schema: SearchSnapshot })
       },
-    )
-    .otherwise((data) => {
-      const [post, comments] = ThreadResponse.parse(data)
-      return toThread({ post: post.data.children[0].data, comments: extractComments({ items: comments.data.children, depth: 0, byScore: false }), postId })
     })
+    const units = snapshot.units.flatMap((unit) => {
+      const parsed = ResultUnit.safeParse(unit)
+      return parsed.success ? [parsed.data] : []
+    })
+
+    return match({ found: snapshot.units.length, valid: units.length, noResults: snapshot.noResults })
+      .with({ valid: P.number.gt(0) }, () => units.slice(0, input.limit).map(toSearchSummary))
+      .with({ found: P.number.gt(0) }, () => {
+        throw new RedditPageError({ refusal: PageRefusal.Unexpected, detail: 'Reddit result cards changed shape: no card had a title and a /r/<sub>/comments/ link' })
+      })
+      .with({ noResults: true }, () => [])
+      .otherwise(() => {
+        throw toPageError(snapshot)
+      })
+  })
 }
 
-export async function resolveShareLink(url: string): Promise<string> {
-  const path = await withRedditPage({ url, read: (pageId) => evaluateInPage({ pageId, source: '() => location.pathname', schema: z.string() }) })
-  const postId = path.match(/\/comments\/([a-z0-9]+)/)?.[1]
-  if (postId === undefined) throw new RedditPageError(`share link did not lead to a thread (landed on ${path})`)
+interface FetchViaBrowserInput {
+  postId: string
+  options: CommentOptions
+}
 
-  return postId
+export function fetchViaBrowser({ postId, options }: FetchViaBrowserInput): Promise<Thread> {
+  return withHumanFix(async () => {
+    const snapshot = await withRedditPage({
+      url: threadJsonUrl({ postId, options }),
+      read: (pageId) => evaluateInPage({ pageId, source: jsonSnapshotScript, schema: JsonSnapshot }),
+    })
+
+    return match(snapshot.data)
+      .with(P.nullish, () => {
+        throw toPageError(snapshot)
+      })
+      .when(
+        (data) => NotFoundBody.safeParse(data).success,
+        () => {
+          throw new RedditPageError({ refusal: PageRefusal.Unexpected, detail: `post ${postId} not found on Reddit` })
+        },
+      )
+      .otherwise((data) => {
+        const [post, comments] = ThreadResponse.parse(data)
+        const items = options.perLevel === 0 ? [] : comments.data.children
+        return toThread({ post: post.data.children[0].data, comments: extractComments({ items, options, serverSorted: true }), postId, sort: options.sort })
+      })
+  })
+}
+
+export function resolveShareLink(url: string): Promise<string> {
+  return withHumanFix(async () => {
+    const page = await withRedditPage({
+      url,
+      read: (pageId) => evaluateInPage({ pageId, source: '() => ({ title: document.title, text: document.body.innerText.slice(0, 300), path: location.pathname })', schema: PageState.extend({ path: z.string() }) }),
+    })
+    const postId = page.path.match(/\/comments\/([a-z0-9]+)/)?.[1]
+    if (postId === undefined) throw toPageError(page)
+
+    return postId
+  })
 }
 
 export function describeBrowserFailure(error: CommandError): string {
@@ -159,6 +221,101 @@ export function describeBrowserFailure(error: CommandError): string {
     .with(P.string.includes('timed out'), () => `chrome-devtools ${error.detail}: check the chrome-cdp Chrome window (\`chrome-cdp status\`)`)
     .with(P.string.regex(/ECONNREFUSED|could not connect|failed to (launch|connect)|browser has disconnected/i), () => "can't reach the chrome-cdp Chrome: start it with `chrome-cdp up`")
     .otherwise((detail) => `chrome-devtools: ${detail}`)
+}
+
+function threadJsonUrl({ postId, options }: FetchViaBrowserInput): string {
+  const params = new URLSearchParams({
+    sort: commentSortParams[options.sort],
+    depth: String(Math.max(options.maxDepth, 1)),
+    limit: String(options.perLevel === 0 ? 1 : maxApiComments),
+    raw_json: '1',
+  })
+  return `${wwwBase}/comments/${postId}/.json?${params}`
+}
+
+async function withHumanFix<T>(attempt: () => Promise<T>): Promise<T> {
+  try {
+    return await attempt()
+  } catch (error) {
+    const refused = match(error)
+      .with(P.intersection(P.instanceOf(RedditPageError), { refusal: P.union(PageRefusal.Blocked, PageRefusal.Challenge) }), (failure) => failure)
+      .otherwise(() => null)
+    if (refused === null) throw error
+
+    const fixed = await awaitHumanFix(refused.refusal)
+    if (!fixed) throw new RedditPageError({ refusal: refused.refusal, detail: `${refused.message} (nobody fixed it within ${humanWaitMs / 60_000} min)` })
+
+    return attempt()
+  }
+}
+
+async function awaitHumanFix(refusal: PageRefusal): Promise<boolean> {
+  mkdirSync(cacheDir, { recursive: true })
+  if (gaveUpRecently()) return false
+
+  removeLockOlderThan({ path: humanLockPath, maxAgeMs: humanWaitMs + staleLockMs })
+  return tryCreateLock(humanLockPath) ? guideHumanThroughFix(refusal) : waitForOtherRunsFix()
+}
+
+async function guideHumanThroughFix(refusal: PageRefusal): Promise<boolean> {
+  const action = refusal === PageRefusal.Blocked ? humanActionsByRefusal[PageRefusal.Blocked] : humanActionsByRefusal[PageRefusal.Challenge]
+
+  try {
+    const pageId = await openPage({ url: action.url, background: false })
+    await alertUser({ title: 'search-reddit', message: action.message, focusPid: await getChromePid() })
+    const fixed = await pollUntilFixed({ pageId, deadline: Date.now() + humanWaitMs })
+    await closePage(pageId)
+    if (!fixed) writeFileSync(humanGaveUpPath, String(Date.now()))
+
+    return fixed
+  } finally {
+    rmSync(humanLockPath, { force: true, recursive: true })
+  }
+}
+
+interface PollUntilFixedInput {
+  pageId: number
+  deadline: number
+}
+
+async function pollUntilFixed({ pageId, deadline }: PollUntilFixedInput): Promise<boolean> {
+  await Bun.sleep(humanPollMs)
+  const state = await evaluateInPage({ pageId, source: humanCheckScript, schema: HumanCheckState }).catch(() => null)
+  const refused = state === null ? true : [blockedPhrase, challengePhrase].some((phrase) => `${state.title} ${state.text}`.includes(phrase))
+  const fixed = state === null ? false : [state.signedIn, !refused].every(Boolean)
+
+  return match({ fixed, expired: Date.now() >= deadline })
+    .with({ fixed: true }, () => true)
+    .with({ expired: true }, () => false)
+    .otherwise(() => pollUntilFixed({ pageId, deadline }))
+}
+
+async function waitForOtherRunsFix(): Promise<boolean> {
+  const deadline = Date.now() + humanWaitMs + humanPollMs * 2
+  await waitWhileLocked({ path: humanLockPath, deadline })
+
+  return !gaveUpRecently()
+}
+
+interface WaitWhileLockedInput {
+  path: string
+  deadline: number
+}
+
+async function waitWhileLocked({ path, deadline }: WaitWhileLockedInput): Promise<void> {
+  if ([!existsSync(path), Date.now() >= deadline].some(Boolean)) return
+
+  await Bun.sleep(humanPollMs)
+  return waitWhileLocked({ path, deadline })
+}
+
+function gaveUpRecently(): boolean {
+  try {
+    const gaveUpAt = z.coerce.number().catch(0).parse(readFileSync(humanGaveUpPath, 'utf8'))
+    return Date.now() - gaveUpAt < humanGiveUpCooldownMs
+  } catch {
+    return false
+  }
 }
 
 interface LoadMoreResultsInput {
@@ -186,12 +343,17 @@ function browserSearchUrl({ query, sub, sort, timeRange }: SearchPostsInput): st
 }
 
 function toPageError({ title, text }: PageState): RedditPageError {
-  const detail = match(`${title} ${text}`)
-    .with(P.string.includes(blockedPhrase), () => `Reddit blocked the chrome-cdp Chrome ("${blockedPhrase}"): sign in to Reddit in its window (\`chrome-cdp up\` opens it)`)
-    .with(P.string.includes(challengePhrase), () => `Reddit asks for a human check ("${challengePhrase}"): pass it in the chrome-cdp Chrome window`)
-    .otherwise(() => `unexpected Reddit page "${title}": ${text.replaceAll('\n', ' ').slice(0, 120)}`)
-
-  return new RedditPageError(detail)
+  return match(`${title} ${text}`)
+    .with(
+      P.string.includes(blockedPhrase),
+      () =>
+        new RedditPageError({ refusal: PageRefusal.Blocked, detail: `Reddit blocked the chrome-cdp Chrome ("${blockedPhrase}"): sign in to Reddit in its window (\`chrome-cdp up\` opens it)` }),
+    )
+    .with(
+      P.string.includes(challengePhrase),
+      () => new RedditPageError({ refusal: PageRefusal.Challenge, detail: `Reddit asks for a human check ("${challengePhrase}"): pass it in the chrome-cdp Chrome window` }),
+    )
+    .otherwise(() => new RedditPageError({ refusal: PageRefusal.Unexpected, detail: `unexpected Reddit page "${title}": ${text.replaceAll('\n', ' ').slice(0, 120)}` }))
 }
 
 function toSearchSummary(unit: ResultUnit): PostSummary {
@@ -215,7 +377,7 @@ interface WithRedditPageInput<T> {
 
 async function withRedditPage<T>({ url, read }: WithRedditPageInput<T>): Promise<T> {
   await waitForRequestSlot()
-  const pageId = await openPage(url)
+  const pageId = await openPage({ url, background: true })
 
   try {
     return await read(pageId)
@@ -231,46 +393,57 @@ async function waitForRequestSlot(): Promise<void> {
 
 async function reserveRequestSlot(): Promise<number> {
   mkdirSync(cacheDir, { recursive: true })
-  await acquireLock({ attemptsLeft: lockAttempts })
+  await acquireRequestLock({ attemptsLeft: lockAttempts })
 
   try {
     const slot = Math.max(Date.now(), readLastSlot() + minRequestGapMs)
     writeFileSync(lastSlotPath, String(slot))
     return slot
   } finally {
-    rmSync(lockPath, { force: true, recursive: true })
+    rmSync(requestLockPath, { force: true, recursive: true })
   }
 }
 
-interface AcquireLockInput {
+interface AcquireRequestLockInput {
   attemptsLeft: number
 }
 
-async function acquireLock({ attemptsLeft }: AcquireLockInput): Promise<void> {
-  return match({ created: tryCreateLock(), exhausted: attemptsLeft === 0 })
+async function acquireRequestLock({ attemptsLeft }: AcquireRequestLockInput): Promise<void> {
+  return match({ created: tryCreateLock(requestLockPath), exhausted: attemptsLeft === 0 })
     .with({ created: true }, () => undefined)
-    .with({ exhausted: true }, () => takeOverStaleLock())
+    .with({ exhausted: true }, () => takeOverStaleRequestLock())
     .otherwise(async () => {
       await Bun.sleep(lockRetryMs)
-      return acquireLock({ attemptsLeft: attemptsLeft - 1 })
+      return acquireRequestLock({ attemptsLeft: attemptsLeft - 1 })
     })
 }
 
-function tryCreateLock(): boolean {
+function tryCreateLock(path: string): boolean {
   try {
-    mkdirSync(lockPath)
+    mkdirSync(path)
     return true
   } catch {
     return false
   }
 }
 
-function takeOverStaleLock(): void {
-  const lockedAtMs = statSync(lockPath, { throwIfNoEntry: false })?.mtimeMs ?? 0
-  if (Date.now() - lockedAtMs < staleLockMs) throw new RedditPageError('another search-reddit run holds the request lock; retry in a few seconds')
+function takeOverStaleRequestLock(): void {
+  removeLockOlderThan({ path: requestLockPath, maxAgeMs: staleLockMs })
+  if (!tryCreateLock(requestLockPath)) {
+    throw new RedditPageError({ refusal: PageRefusal.Unexpected, detail: 'another search-reddit run holds the request lock; retry in a few seconds' })
+  }
+}
 
-  rmSync(lockPath, { force: true, recursive: true })
-  mkdirSync(lockPath)
+interface RemoveLockOlderThanInput {
+  path: string
+  maxAgeMs: number
+}
+
+function removeLockOlderThan({ path, maxAgeMs }: RemoveLockOlderThanInput): void {
+  const lockedAtMs = statSync(path, { throwIfNoEntry: false })?.mtimeMs
+  if (lockedAtMs === undefined) return
+
+  if (Date.now() - lockedAtMs > maxAgeMs) rmSync(path, { force: true, recursive: true })
 }
 
 function readLastSlot(): number {

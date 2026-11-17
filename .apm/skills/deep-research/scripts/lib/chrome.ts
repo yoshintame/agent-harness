@@ -1,8 +1,10 @@
+import $ from 'dax-sh@0.42.0'
 import { z } from 'zod@4.6.5'
 import { CommandError, runJsonCommand } from './process'
 
 const command = 'chrome-devtools'
 const commandTimeoutMs = 60_000
+const statusTimeoutMs = 10_000
 const pageLoadTimeoutMs = 30_000
 
 const PagesResponse = z.object({
@@ -11,8 +13,14 @@ const PagesResponse = z.object({
 
 const MessageResponse = z.object({ message: z.string() })
 
-export async function openPage(url: string): Promise<number> {
-  const response = await runChromeDevtools({ args: ['new_page', url, '--background', '--timeout', String(pageLoadTimeoutMs)], schema: PagesResponse })
+interface OpenPageInput {
+  url: string
+  background: boolean
+}
+
+export async function openPage({ url, background }: OpenPageInput): Promise<number> {
+  const args = ['new_page', url, ...(background ? ['--background'] : []), '--timeout', String(pageLoadTimeoutMs)]
+  const response = await runChromeDevtools({ args, schema: PagesResponse })
   const page = response.pages.find((candidate) => candidate.selected)
   if (page === undefined) throw new CommandError({ command, detail: 'new_page returned no selected page' })
 
@@ -21,6 +29,12 @@ export async function openPage(url: string): Promise<number> {
 
 export async function closePage(pageId: number): Promise<void> {
   await runChromeDevtools({ args: ['close_page', String(pageId)], schema: z.unknown() }).catch(() => undefined)
+}
+
+export async function getChromePid(): Promise<number | null> {
+  const result = await $`chrome-cdp status`.stdout('piped').stderr('piped').timeout(statusTimeoutMs).noThrow()
+  const pid = Number(result.stdout.match(/tracked pid:\s*(\d+)/)?.[1])
+  return Number.isInteger(pid) ? pid : null
 }
 
 interface EvaluateInPageInput<T> {

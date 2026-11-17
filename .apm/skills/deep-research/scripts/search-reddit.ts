@@ -13,6 +13,7 @@ import {
   printBlock,
   printComment,
   printEntries,
+  parseCount,
   ReportError,
   readLimit,
   runCli,
@@ -21,6 +22,8 @@ import {
 } from './lib'
 import {
   ArcticSort,
+  type CommentOptions,
+  CommentSort,
   describeArcticHttpError,
   describeBrowserFailure,
   fetchViaArctic,
@@ -107,13 +110,26 @@ const search = defineCommand({
 })
 
 const fetchCommand = defineCommand({
-  meta: { name: 'fetch', description: 'Fetch a specific thread with top comments' },
+  meta: { name: 'fetch', description: 'Fetch a specific thread with its comments' },
   args: {
     url: { type: 'positional', required: true, description: 'Thread URL: reddit.com/.../comments/<id>, redd.it/<id> or a /r/<sub>/s/<token> share link' },
+    comments: { type: 'string', default: '10', description: 'Comments per level; 0 fetches the post alone' },
+    depth: { type: 'string', default: '3', description: 'Comment levels to keep; 1 keeps top-level comments only' },
+    sort: {
+      type: 'enum',
+      options: Object.values(CommentSort),
+      default: CommentSort.Top,
+      description: 'Comment order, sorted by Reddit',
+    },
     json: jsonArg,
   },
   async run({ args }) {
-    const result = await fetchThread(parseThreadUrl(args.url))
+    const options = {
+      perLevel: parseCount({ flag: 'comments', value: args.comments }),
+      maxDepth: parseCount({ flag: 'depth', value: args.depth }),
+      sort: args.sort,
+    }
+    const result = await fetchThread({ ref: parseThreadUrl(args.url), options })
     reportFallback(result)
     emit({ value: result.value, json: args.json, printMarkdown: printThread })
   },
@@ -159,7 +175,12 @@ function searchPosts(input: SearchPostsInput): Promise<StageResult<PostSummary[]
   return runStages({ operation: 'search', attempts: arctic === null ? [browser] : [browser, arctic], hint: arctic === null ? noArchiveHint : undefined })
 }
 
-async function fetchThread(ref: ThreadRef): Promise<StageResult<Thread>> {
+interface FetchThreadInput {
+  ref: ThreadRef
+  options: CommentOptions
+}
+
+async function fetchThread({ ref, options }: FetchThreadInput): Promise<StageResult<Thread>> {
   const postId = await match(ref)
     .with({ kind: 'post' }, ({ postId: id }) => id)
     .with({ kind: 'share' }, ({ url }) => resolveShareLink(url).catch((error: unknown) => fail(`search-reddit fetch: ${describeFailure(error)}`)))
@@ -168,8 +189,8 @@ async function fetchThread(ref: ThreadRef): Promise<StageResult<Thread>> {
   return runStages({
     operation: 'fetch',
     attempts: [
-      { stage: Stage.Browser, note: browserNote, run: () => fetchViaBrowser(postId) },
-      { stage: Stage.Arctic, note: arcticFetchNote, run: () => fetchViaArctic(postId) },
+      { stage: Stage.Browser, note: browserNote, run: () => fetchViaBrowser({ postId, options }) },
+      { stage: Stage.Arctic, note: arcticFetchNote, run: () => fetchViaArctic({ postId, options }) },
     ],
     hint: undefined,
   })
@@ -259,8 +280,9 @@ function printThread(thread: Thread): void {
     thread.url,
   ])
   if (thread.selftext) printBlock([thread.selftext])
-  printBlock([`## Top comments (${thread.top_comments.length})`])
+  if (thread.top_comments.length === 0) return
 
+  printBlock([`## Comments (${thread.top_comments.length}, sorted by ${thread.comment_sort})`])
   for (const comment of thread.top_comments) {
     printComment({ depth: comment.depth, header: `[${formatScore({ score: comment.score, width: 4 })}] u/${comment.author ?? ''}:`, body: comment.body })
   }

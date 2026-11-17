@@ -18,7 +18,7 @@
 
 Кураторские индексы (awesome-списки) дают широкий срез дёшево, но не полагайся на них как на главный канал: крупные списки README-only, часть написана вендорами про себя, а выдача по слову `awesome` засорена клонами-фермами. Похороненный слой анонсов даёт больше — см. HN ниже.
 
-Вызовы: скрипты **всегда с `dangerouslyDisableSandbox: true`** — песочница закрывает сеть до их хостов, а `search-github` вдобавок не может прочитать `~/.config/gh`, и ошибка читается как обычный сбой команды. Тред целиком — `bun --install=force <skill-dir>/scripts/search-reddit.ts fetch <url>` / `bun --install=force <skill-dir>/scripts/search-hn.ts fetch <id>`, не WebFetch: вывод чище.
+Вызовы: скрипты **всегда с `dangerouslyDisableSandbox: true`** — песочница закрывает сеть до их хостов, а `search-github` вдобавок не может прочитать `~/.config/gh`, и ошибка читается как обычный сбой команды. Тред целиком — `bun --install=force <skill-dir>/scripts/search-reddit.ts fetch <url>` / `bun --install=force <skill-dir>/scripts/search-hn.ts fetch <id>`, не WebFetch: вывод чище. У `search-reddit fetch` есть `--comments N` (на уровень; `0` — только пост), `--depth D` (уровней; по умолчанию 3) и `--sort top|best|new|old|controversial|qa` — порядок задаёт сам Reddit; `controversial` поднимает спорные ветки — с них начинай поиск претензий к инструменту.
 
 ## Awesome-майнинг — три шага, первым делом
 

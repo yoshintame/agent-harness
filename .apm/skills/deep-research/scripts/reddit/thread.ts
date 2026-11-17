@@ -1,11 +1,25 @@
 import { orderBy, take } from 'es-toolkit@1.52.0'
+import { match } from 'ts-pattern@5.9.0'
 import { z } from 'zod@4.6.5'
 
 export const wwwBase = 'https://www.reddit.com'
 
-const maxCommentDepth = 2
-const maxCommentsPerLevel = 10
 const removedBodies = new Set(['', '[deleted]', '[removed]'])
+
+export enum CommentSort {
+  Top = 'top',
+  Best = 'best',
+  New = 'new',
+  Old = 'old',
+  Controversial = 'controversial',
+  Qa = 'qa',
+}
+
+export interface CommentOptions {
+  perLevel: number
+  maxDepth: number
+  sort: CommentSort
+}
 
 export const Post = z.object({
   title: z.string().nullish(),
@@ -29,6 +43,7 @@ const CommentThing = z.object({
   data: z.object({
     author: z.string().nullish(),
     score: z.number().nullish(),
+    created_utc: z.number().nullish(),
     body: z.string().nullish(),
     replies: z.unknown().optional(),
   }),
@@ -63,6 +78,7 @@ export interface Thread {
   url: string
   author: string | null
   selftext: string
+  comment_sort: CommentSort
   top_comments: Comment[]
 }
 
@@ -83,9 +99,10 @@ interface ToThreadInput {
   post: Post
   comments: Comment[]
   postId: string
+  sort: CommentSort
 }
 
-export function toThread({ post, comments, postId }: ToThreadInput): Thread {
+export function toThread({ post, comments, postId, sort }: ToThreadInput): Thread {
   return {
     title: post.title ?? null,
     subreddit: post.subreddit ?? null,
@@ -94,47 +111,59 @@ export function toThread({ post, comments, postId }: ToThreadInput): Thread {
     url: wwwBase + (post.permalink ?? `/comments/${postId}/`),
     author: post.author ?? null,
     selftext: post.selftext ?? '',
+    comment_sort: sort,
     top_comments: comments,
   }
 }
 
 interface ExtractCommentsInput {
   items: unknown[]
-  depth: number
-  byScore: boolean
+  options: CommentOptions
+  serverSorted: boolean
 }
 
-export function extractComments({ items, depth, byScore }: ExtractCommentsInput): Comment[] {
-  const comments = items.flatMap((item) => {
+export function extractComments({ items, options, serverSorted }: ExtractCommentsInput): Comment[] {
+  return extractLevel({ items, depth: 0, options, serverSorted })
+}
+
+interface ExtractLevelInput extends ExtractCommentsInput {
+  depth: number
+}
+
+function extractLevel({ items, depth, options, serverSorted }: ExtractLevelInput): Comment[] {
+  if (depth >= options.maxDepth) return []
+
+  const comments = parseComments(items).filter((comment) => !removedBodies.has(comment.body ?? ''))
+  const ranked = rankComments({ comments, sort: options.sort, serverSorted })
+
+  return take(ranked, options.perLevel).flatMap((comment) => [
+    { author: comment.author ?? null, score: comment.score ?? null, body: comment.body ?? '', depth },
+    ...extractLevel({ items: childItems(comment), depth: depth + 1, options, serverSorted }),
+  ])
+}
+
+interface RankCommentsInput {
+  comments: CommentData[]
+  sort: CommentSort
+  serverSorted: boolean
+}
+
+function rankComments({ comments, sort, serverSorted }: RankCommentsInput): CommentData[] {
+  return match({ sort, serverSorted })
+    .with({ serverSorted: true }, () => comments)
+    .with({ sort: CommentSort.New }, () => orderBy(comments, [(comment) => comment.created_utc ?? 0], ['desc']))
+    .with({ sort: CommentSort.Old }, () => orderBy(comments, [(comment) => comment.created_utc ?? 0], ['asc']))
+    .otherwise(() => orderBy(comments, [(comment) => comment.score ?? 0], ['desc']))
+}
+
+function childItems(comment: CommentData): unknown[] {
+  const replies = RepliesListing.safeParse(comment.replies)
+  return replies.success ? replies.data.data.children : []
+}
+
+function parseComments(items: unknown[]): CommentData[] {
+  return items.flatMap((item) => {
     const parsed = CommentThing.safeParse(item)
     return parsed.success ? [parsed.data.data] : []
   })
-  const ranked = byScore ? orderBy(comments, [(comment) => comment.score ?? 0], ['desc']) : comments
-
-  return take(ranked, maxCommentsPerLevel).flatMap((comment) => toCommentWithReplies({ comment, depth, byScore }))
-}
-
-interface ToCommentWithRepliesInput {
-  comment: CommentData
-  depth: number
-  byScore: boolean
-}
-
-function toCommentWithReplies({ comment, depth, byScore }: ToCommentWithRepliesInput): Comment[] {
-  const body = comment.body ?? ''
-  if (removedBodies.has(body)) return []
-
-  const replies = RepliesListing.safeParse(comment.replies)
-  const nested = replies.success ? extractReplies({ children: replies.data.data.children, depth, byScore }) : []
-  return [{ author: comment.author ?? null, score: comment.score ?? null, body, depth }, ...nested]
-}
-
-interface ExtractRepliesInput {
-  children: unknown[]
-  depth: number
-  byScore: boolean
-}
-
-function extractReplies({ children, depth, byScore }: ExtractRepliesInput): Comment[] {
-  return depth < maxCommentDepth ? extractComments({ items: children, depth: depth + 1, byScore }) : []
 }

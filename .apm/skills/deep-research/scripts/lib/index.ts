@@ -1,5 +1,6 @@
-export { closePage, evaluateInPage, openPage } from './chrome'
-export { describeError, emit, fail, jsonArg, limitArg, parseOptionalCount, ReportError, readLimit, runCli } from './cli'
+export { closePage, evaluateInPage, getChromePid, openPage } from './chrome'
+export { alertUser } from './desktop'
+export { describeError, emit, fail, jsonArg, limitArg, parseCount, parseOptionalCount, ReportError, readLimit, runCli } from './cli'
 export { HttpError, requestJson } from './http'
 export { CommandError, runJsonCommand } from './process'
 export { printBlock, printComment, printEntries, stripHtml, toAbsoluteUrl, toOneLine, unescapeHtml } from './text'
