@@ -18,7 +18,7 @@
 
 Кураторские индексы (awesome-списки) дают широкий срез дёшево, но не полагайся на них как на главный канал: крупные списки README-only, часть написана вендорами про себя, а выдача по слову `awesome` засорена клонами-фермами. Похороненный слой анонсов даёт больше — см. HN ниже.
 
-Вызовы: `search-github` **всегда с `dangerouslyDisableSandbox: true`** — под сандбоксом он умирает с `tls: failed to verify certificate: x509: OSStatus -26276`, и ошибка читается как обычный сбой команды. Тред целиком — `search-reddit fetch <url>` / `search-hn fetch <id>`, не WebFetch: вывод чище.
+Тред целиком — `search-hn fetch <id>` и `search-reddit fetch <url>`, не WebFetch. `fetch --sort controversial` поднимает спорные ветки — с них начинай поиск претензий к инструменту; `fetch --comments 0` — только пост, когда из анонса нужна лишь ссылка.
 
 ## Awesome-майнинг — три шага, первым делом
 
@@ -52,16 +52,16 @@ search-github search "<имя> in:name"
 
 Предел зеркальный поиску по GitHub: репозиторий без звёзд и входящих ссылок здесь не покажется никогда. Если ищешь именно такой — остаются `in:name` по угаданному имени и awesome-майнинг.
 
-## Reddit: сортировка решает
+## Reddit: анонсы живут на низких баллах
 
-- **Дискавери → `--sort new`.** Анонсы живут на 0–12 баллах, а `relevance` и `top` скор-взвешены и ранжируют против них: на скор-взвешенной сортировке выдача заполняется обсуждениями, а инструментов в ней нет. Сканируй заголовки, скором не фильтруй — низкий балл у анонса нормален.
-- **Настроения и migration stories → `relevance` или `top`** — там высокий скор и есть сигнал.
+Порядок работы с сабом — флейры, затем `top` и `search` с фильтром — в разделе Reddit в SKILL.md. Для софта поверх него:
+
+- **Дискавери инструментов → `--sort new`** (шаг 3 и `search … --sort new --time year`). Анонсы живут на 0–12 баллах, а `top` и `relevance` скор-взвешены и ранжируют против них: там выдача заполняется обсуждениями, а инструментов в ней нет. Сканируй заголовки, скором не фильтруй. Флейр анонсов (`Addon Announcement`, `Release`, `Showcase`…) бери в `--flair`.
+- **Настроения и migration stories → `top` или `--sort relevance`** — там высокий скор и есть сигнал.
 
 ```bash
 search-reddit search "built" --sub <subreddit> --sort new --time year --limit 25
 ```
-
-Запросы держи в 2 слова; длиннее — только вместе с `--sub`, иначе выдачу забивают вирусные посты со случайным совпадением. Причина механическая: многословный запрос скрипт превращает в Lucene `+word1 +word2`, то есть требует все слова разом. Пустая выдача на длинном запросе — повод повторить с `--loose` или укоротить, а не вывод об отсутствии. Синтаксис Reddit проходит насквозь: `title:X author:Y` работает.
 
 ## HN
 
@@ -70,6 +70,16 @@ search-reddit search "built" --sub <subreddit> --sort new --time year --limit 25
 ```bash
 search-hn search "<query>" --tags show_hn   # анонсы и запуски
 search-hn search "<query>" --by-date        # хронологически: свежий инцидент, релиз, разбор
+```
+
+## Discourse
+
+Если у экосистемы есть Discourse-форум (известные — `search-discourse instances`), ищи треды WebSearch'ем `site:<host> <query>` — `/search` у Discourse закрыт в robots.txt — и читай `fetch`. `latest <alias|host>` — что обсуждают сейчас, для вопросов про свежий инцидент или релиз.
+
+```bash
+search-discourse fetch <topic-url>        # тред с постами
+search-discourse latest <alias|host>      # свежие темы: rust, obsidian, hass, docker…
+search-discourse instances                # известные алиасы
 ```
 
 ## Красные флаги кандидата
