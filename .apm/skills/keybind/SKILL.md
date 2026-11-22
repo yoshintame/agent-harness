@@ -17,7 +17,7 @@ Workflow для добавления/изменения клавиатурных
 |---|---|
 | `~/Documents/obsidian/yoshintame/projects/keybinds-architecture/keybinds-architecture.md` | **Всегда.** Две оси (scope × direct/leader), hyper, action vs binding, чеклист «принципы при добавлении нового бинда». |
 | `~/Documents/obsidian/yoshintame/projects/keybinds-system/keybinds-system.md` | Системные бинды — абстрактная модель (что забиндено, какие слои). Таблиц самих биндов тут нет. |
-| `~/Documents/obsidian/yoshintame/projects/hammerspoon-keybindings.md` | **Hammerspoon: App Launcher + leader `F18`.** Здесь живут таблицы биндов leader-дерева — правится при любой правке `main.lua`. |
+| `~/Documents/obsidian/yoshintame/projects/hammerspoon-keybindings.md` | **Hammerspoon: App Launcher + leader `F18`.** Здесь живут таблицы биндов leader-дерева — правится при любой правке `user/leader.lua` / `user/direct.lua`. |
 | `~/Documents/obsidian/yoshintame/projects/karabiner-hyperlayers.md` | Karabiner: hyper-слои и sublayers. Таблицы hyper-биндов. |
 | `~/Documents/obsidian/yoshintame/projects/keybinds-vscode/keybinds-vscode.md` | VSCode/Cursor хаб. |
 | `~/Documents/obsidian/yoshintame/projects/keybinds-vscode/direct-shortcuts.md` | VSCode direct (cmd+...). |
@@ -55,9 +55,9 @@ Workflow для добавления/изменения клавиатурных
 
 | Layer | Что проверять |
 |---|---|
-| Karabiner direct + hyper | `~/.dotfiles/modules/home/karabiner/config/src/hyper-layer-binds.ts` (бинды) и `actions.ts` (action-имена). |
-| Hammerspoon leader (`F18 → ...`) | `~/.dotfiles/modules/home/hammerspoon/config/` — leader-конфиг + sublayers. |
-| Hammerspoon App Launcher | `~/.dotfiles/modules/home/hammerspoon/config/` — `Alt+<letter>` маппинги. |
+| Karabiner (все слои) | Репо `karabiner-config` (клон — сабмодуль `~/.dotfiles/modules/home/karabiner/config`): `src/keymap/<слой>.ts` (`base`, `hyper`, `tab`, `rcmd`, `slash`; реестр слоёв — `layers.ts`) и `src/actions.ts` (action-имена). |
+| Hammerspoon leader (`F18 → ...`) | `~/.dotfiles/modules/home/hammerspoon/config/user/leader.lua`. |
+| Hammerspoon App Launcher и direct | `~/.dotfiles/modules/home/hammerspoon/config/user/direct.lua` (`launcher` — `Alt+<letter>`, `binds`, `proxy`); фичи с модальными клавишами — `user/features.lua`. |
 | VSCode direct | `~/.dotfiles/modules/home/vscode/config/keybindings.json` — собственные бинды + снятые конфликты. Плюс дефолты VSCode/Cursor (если бинд не `cmd+...`, проверить, занят ли он расширением). |
 | VSCode whichkey (leader) | `~/.dotfiles/modules/home/vscode/config/settings.json` → поле `whichkey.bindings`. |
 | Proxy bindings (третьи приложения) | `~/.dotfiles/modules/shared/proxy-bindings.yaml`. |
@@ -74,8 +74,8 @@ Workflow для добавления/изменения клавиатурных
 
 В зависимости от уровня:
 
-- **Karabiner**: правки в `src/hyper-layer-binds.ts` (binding) и `src/actions.ts` (если новый action). Karabiner build — отдельный проект, см. `[[karabiner-build]]` в vault.
-- **Hammerspoon**: правки в leader-конфиге. После изменений — `hs.reload()` через Hammerspoon console (или подождать live-reload, если настроен).
+- **Karabiner**: правки в `src/keymap/<слой>.ts` (binding) и `src/actions.ts` (если новый action), раскладка и порядок сборки — в `AGENTS.md` репо. `bun run build` пишет живой `build/karabiner.json` — в worktree собирать и проверять через `bun src/index.ts --dry-run` / `bun test`.
+- **Hammerspoon**: правки в `user/*.lua` или `features/*`. Конфиг перечитывается сам при сохранении (pathwatcher в `init.lua`).
 - **VSCode direct**: правки в `keybindings.json`. Применяется автоматически.
 - **VSCode whichkey**: правки в `settings.json` → `whichkey.bindings`. Применяется автоматически.
 - **Proxy bindings**: правки в `proxy-bindings.yaml` + `dot proxy-bindings` (или `dot rebuild`). Если бинд ещё не записан в самом third-party приложении — Hyper Setup mode (`F18 → u → h`), Tab+key в shortcut-диалоге, обратно `F18 → u → h`.
