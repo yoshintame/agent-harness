@@ -32,9 +32,9 @@ several skills, hooks or services.
 
 `vendor/claude-code/` is generated from local Claude Code session transcripts by
 `bun scripts/vendor-claude-code.ts` (system prompt, built-in general-purpose
-subagent prompt, `/code-review` and `/security-review` recipes) for reference and
-diffing. It is gitignored because the texts are Anthropic's proprietary content:
-never commit them. Re-run the script after a Claude Code update.
+subagent prompt, `/code-review` and `/security-review` recipes, the built-in
+`artifact-*` skill texts) for reference and diffing. It is gitignored because the
+texts are Anthropic's proprietary content: never commit them. Re-run the script after a Claude Code update.
 `scripts/build-orchestrator.ts` builds the gitignored `claude/agents/orchestrator.md`
 from the vendored system prompt and `claude/orchestrator/rules.md`; re-run both
 after a Claude Code update or a rules change.

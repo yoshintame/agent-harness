@@ -9,6 +9,9 @@ const outDir = join(repoRoot, 'vendor', 'claude-code')
 const expectedCodeReviewLevels = ['low', 'medium', 'high', 'xhigh', 'max']
 const gpPrefix = 'You are an agent for Claude Code'
 const securityTail = '\nReview the complete diff above.'
+const builtinSkills = ['artifact-design', 'artifact-capabilities', 'artifact-diagramming']
+const quickstartDesignMarker = '## Page contract'
+const quickstartDesignTail = /\n+\[Design systems [^\n]*\]\s*$/
 
 interface Found {
   version: string | undefined
@@ -53,6 +56,28 @@ class Collector {
     if (slot?.fallback) return { found: slot.fallback, exact: false }
     return undefined
   }
+}
+
+class NewestCollector {
+  readonly picks = new Map<string, Found>()
+
+  offer(key: string, found: Found): void {
+    const current = this.picks.get(key)
+    if (current === undefined || compareVersions(found.version, current.version) > 0) this.picks.set(key, found)
+  }
+}
+
+function compareVersions(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0
+  if (a === undefined) return -1
+  if (b === undefined) return 1
+  const left = a.split('.').map((part) => Number.parseInt(part, 10) || 0)
+  const right = b.split('.').map((part) => Number.parseInt(part, 10) || 0)
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
 }
 
 function installedVersion(): string | undefined {
@@ -193,7 +218,60 @@ function scanSecurityReview(path: string, lines: string[], collector: Collector)
   }
 }
 
-async function scan(projects: string, collector: Collector): Promise<number> {
+function skillBody(text: string): string | undefined {
+  const body = text.replace(/^Base directory for this skill: [^\n]*\n+/, '').trimEnd()
+  if (body === '' || body.startsWith('Launching skill:')) return undefined
+  return body + '\n'
+}
+
+function quickstartDesign(text: string): string | undefined {
+  const start = text.indexOf(quickstartDesignMarker)
+  if (start < 0) return undefined
+  return text.slice(start).replace(quickstartDesignTail, '').trimEnd() + '\n'
+}
+
+function scanBuiltinSkills(path: string, lines: string[], skills: NewestCollector): void {
+  const skillUses = new Map<string, string>()
+  const quickstartUses = new Set<string>()
+  for (const line of lines) {
+    if (line.includes('"type":"assistant"') && line.includes('"tool_use"')) {
+      const record = parse(line)
+      for (const block of record?.message?.content ?? []) {
+        if (block?.type !== 'tool_use') continue
+        if (block.name === 'Skill' && builtinSkills.includes(block.input?.skill)) skillUses.set(block.id, block.input.skill)
+        if (block.name === 'Artifact' && block.input?.action === 'quickstart') quickstartUses.add(block.id)
+      }
+      continue
+    }
+    if ((skillUses.size === 0 && quickstartUses.size === 0) || !line.includes('"type":"user"')) continue
+    const record = parse(line)
+    if (record?.type !== 'user') continue
+    const metaSkill = skillUses.get(record.sourceToolUseID)
+    if (metaSkill !== undefined) {
+      const raw = contentText(record.message?.content)
+      const text = raw ? skillBody(raw) : undefined
+      if (text) skills.offer(metaSkill, { version: record.version, path, text })
+    }
+    const content = record.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (block?.type !== 'tool_result') continue
+      const raw = contentText(block.content)
+      if (raw === undefined) continue
+      const skill = skillUses.get(block.tool_use_id)
+      if (skill !== undefined) {
+        const text = skillBody(raw)
+        if (text) skills.offer(skill, { version: record.version, path, text })
+      }
+      if (quickstartUses.has(block.tool_use_id)) {
+        const text = quickstartDesign(raw)
+        if (text) skills.offer('artifact-design', { version: record.version, path, text })
+      }
+    }
+  }
+}
+
+async function scan(projects: string, collector: Collector, skills: NewestCollector): Promise<number> {
   const files = listTranscripts(projects)
   for (const path of files) {
     const text = await Bun.file(path).text()
@@ -201,6 +279,7 @@ async function scan(projects: string, collector: Collector): Promise<number> {
     if (path.includes(`${sep}subagents${sep}`)) scanSubagent(path, lines, collector)
     else scanMain(path, lines, collector)
     if (text.includes('"skill":"security-review"')) scanSecurityReview(path, lines, collector)
+    if (text.includes('"skill":"artifact-') || text.includes('"action":"quickstart"')) scanBuiltinSkills(path, lines, skills)
   }
   return files.length
 }
@@ -230,7 +309,8 @@ const main = defineCommand({
     const version = installedVersion()
     if (version === undefined) console.warn('warning: could not read `claude --version`; using the newest records of any version')
     const collector = new Collector(version)
-    const count = await scan(projects, collector)
+    const skills = new NewestCollector()
+    const count = await scan(projects, collector, skills)
     console.log(`scanned ${count} transcripts in ${projects} for Claude Code ${version ?? '(unknown)'}`)
 
     const warnings: string[] = []
@@ -277,6 +357,18 @@ const main = defineCommand({
     const security = take('security-review/prompt', 'skills/security-review/prompt.md')
     if (security) write('skills/security-review/prompt.md', security.text)
     else missing.push('skills/security-review/prompt.md')
+
+    for (const name of builtinSkills) {
+      const found = skills.picks.get(name)
+      const label = `skills/${name}.md`
+      if (!found) {
+        missing.push(label)
+        continue
+      }
+      if (found.version !== version) warnings.push(`${label}: newest record is ${found.version ?? 'unknown version'}, installed is ${version ?? 'unknown'}`)
+      sources.push(`${label}\t${found.version ?? 'unknown'}\t${found.path}`)
+      write(label, found.text)
+    }
 
     write('VERSION', [`claude-code ${version ?? 'unknown'}`, '', ...sources, ''].join('\n'))
 
