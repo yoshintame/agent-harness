@@ -224,6 +224,11 @@
             "type": "command",
             "command": "$HOME/.claude/hooks/agent-env.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/orchestrator-refresh.sh",
+            "timeout": 10
           }
         ]
       }
