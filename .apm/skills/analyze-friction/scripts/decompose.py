@@ -16,9 +16,14 @@ import os
 import re
 import sys
 
+_harness = os.environ.get("AGENT_HARNESS")
+if not _harness:
+    sys.exit("decompose: AGENT_HARNESS is not set; point it at the agent-harness clone")
+
 for _h in (
     "~/.claude/hooks",
-    "~/.dotfiles/modules/home/agents-shared/config/hooks",
+    os.path.join(_harness, "claude", "hooks"),
+    os.path.join(_harness, "shared", "hooks"),
 ):
     _p = os.path.expanduser(_h)
     if os.path.exists(os.path.join(_p, "smart_approve.py")):

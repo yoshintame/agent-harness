@@ -11,6 +11,7 @@ Usage:
 """
 
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -19,7 +20,10 @@ from pathlib import Path
 
 # --- Paths ---
 CLAUDE_DIR = Path.home() / ".claude"
-SETTINGS_PATH = Path.home() / ".dotfiles" / "modules" / "claude" / "config" / "settings.json"
+_HARNESS = os.environ.get("AGENT_HARNESS")
+if not _HARNESS:
+    sys.exit("analyze-permissions: AGENT_HARNESS is not set; point it at the agent-harness clone")
+SETTINGS_PATH = Path(_HARNESS) / "claude" / "settings.json"
 SETTINGS_LOCAL_PATH = CLAUDE_DIR / "settings.local.json"
 LOG_PATH = CLAUDE_DIR / "permission-requests.jsonl"
 MARKER_PATH = CLAUDE_DIR / "permission-requests-processed.json"

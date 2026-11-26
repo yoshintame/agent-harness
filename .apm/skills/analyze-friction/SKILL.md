@@ -34,7 +34,7 @@ Violation коррелируется к команде по `tool_use_id` (`asse
 
 - `violation` — фактический отказ (эталон); `bypass` переоценивает (сессии в `bypassPermissions` ставят флаг профилактически). Ранжируй по violation.
 - Не всякий `fs-perm-denied` → `allowWrite`:
-  - `~/.ssh/**`, `~/.config/gh/**`, `~/.dotfiles/**/settings.json`, `~/.claude/**` — защита работает (expected-deny), не открывать.
+  - `~/.ssh/**`, `~/.config/gh/**`, `$AGENT_HARNESS/claude/settings.json`, `~/.claude/**` — защита работает (expected-deny), не открывать.
   - `net-refused` на `localhost`/`127.0.0.1`/`0.0.0.0`/private-IP — сервис не поднят, не блок песочницы.
   - Сигнатура ≠ провал: успешный прогон (`vitest passed`, `bun add Saved lockfile`) несёт сигнатуру от `nice() failed` или под-варнинга и ложно попадает в violation.
 - `ps`/`lsof`/`nice` режет sandbox на syscall-уровне (как fs.watch) — только per-call `dangerouslyDisableSandbox`.
