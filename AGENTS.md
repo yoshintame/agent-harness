@@ -29,3 +29,9 @@ into place through the `agent-harness` nixLink root; the originals live here.
 Vendor dirs (`claude/`, `codex/`, `shared/`) sit at the top. A script used by
 one skill lives in that skill's `scripts/`; `tools/` is only for things shared by
 several skills, hooks or services.
+
+`vendor/claude-code/` is generated from local Claude Code session transcripts by
+`bun scripts/vendor-claude-code.ts` (system prompt, built-in general-purpose
+subagent prompt, `/code-review` and `/security-review` recipes) for reference and
+diffing. It is gitignored because the texts are Anthropic's proprietary content:
+never commit them. Re-run the script after a Claude Code update.

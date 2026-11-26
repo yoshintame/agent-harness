@@ -13,3 +13,5 @@ build/
 
 # Claude permission analyzer backups
 /claude/settings.backup-*.json
+
+/vendor/
