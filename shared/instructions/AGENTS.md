@@ -44,7 +44,7 @@
 - Чужой контент для агента (скилы, MCP, доки) — перед тем как доверять ему, `/ai-attack-audit`.
 - Сочетания клавиш (Karabiner, Hammerspoon, VSCode) — `/keybind`.
 - Агенты, воркспейсы и расписания Paseo — `/paseo`; вопросы о самом Paseo — `/paseo-help`.
-- Поставить, обновить или сменить источник скила, подключить MCP-сервер, править конфиги агентов (этот файл, `settings.json`, хуки) — оригиналы живут в `~/Development/yoshintame/agent-harness` (раскладка — в его `AGENTS.md`), dotfiles только линкуют их (`~/.dotfiles/CLAUDE.md`).
+- Поставить, обновить или сменить источник скила, подключить MCP-сервер, править конфиги агентов (этот файл, `settings.json`, хуки) — оригиналы живут в agent-harness (`$AGENT_HARNESS`, раскладка — в его `AGENTS.md`), dotfiles только линкуют их (`~/.dotfiles/CLAUDE.md`).
 
 ## Вставленные изображения
 

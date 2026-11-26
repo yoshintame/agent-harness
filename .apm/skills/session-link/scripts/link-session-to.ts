@@ -4,7 +4,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 
 const HOME = process.env.HOME ?? "";
-const LINKER = `${HOME}/.dotfiles/packages/link-session/src/cli.ts`;
+const HARNESS = process.env.AGENT_HARNESS;
+const LINKER = `${HARNESS}/claude/tools/link-session/src/cli.ts`;
 
 const HELP = `
 link-session-to — make a Claude Code session resumable from another directory
@@ -64,6 +65,7 @@ const dst = resolveDir(positionals[0]!, "dst-cwd");
 const src = resolveDir(positionals[1] ?? process.cwd(), "src-cwd");
 if (src === dst) fail(`src-cwd and dst-cwd are the same path: ${src}`);
 
+if (!HARNESS) fail("AGENT_HARNESS is not set; point it at the agent-harness clone");
 if (!fs.existsSync(LINKER)) fail(`linker not found at ${LINKER}`);
 
 const sessionId = (values.session ?? process.env.CLAUDE_CODE_SESSION_ID ?? "").trim() || newestTranscriptId(projectDir(src));

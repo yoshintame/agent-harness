@@ -6,7 +6,10 @@ if [[ -n "${SANDBOX_RUNTIME:-}" || -n "${CODEX_SANDBOX:-}" ]]; then
   exit 1
 fi
 
-root="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+root="$(dirname "$(readlink -f "$0")")"
+while [[ "$root" != / && ! -f "$root/package.json" ]]; do
+  root="$(dirname "$root")"
+done
 cli="$root/node_modules/.bin/chrome-devtools"
 if [[ ! -x "$cli" ]]; then
   echo "chrome-devtools: $cli is missing; run 'bun install' in $root" >&2

@@ -1,13 +1,10 @@
 # shellcheck shell=bash
 # Shared glue for the Claude Code session hardlink router.
 # Sourced by worktree-create.sh / session-start.sh.
-# Resolves the dotfiles repo root (from this file's real location) and a bun
-# binary (mise PATH may be absent in the hook env), then invokes the TS linker
-# non-blocking: it never writes stdout and never aborts the caller.
 
 _cc_self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || realpath "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 _CC_LINKER="$(dirname "$_cc_self")/../../tools/link-session/src/cli.ts"
-[ -f "$_CC_LINKER" ] || _CC_LINKER="${AGENT_HARNESS:-$HOME/Development/yoshintame/agent-harness}/claude/tools/link-session/src/cli.ts"
+[ -f "$_CC_LINKER" ] || [ -z "${AGENT_HARNESS:-}" ] || _CC_LINKER="$AGENT_HARNESS/claude/tools/link-session/src/cli.ts"
 _CC_LOG="$HOME/.claude/logs/link-session.hook.log"
 
 _cc_ensure_logdir() {

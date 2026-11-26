@@ -2,7 +2,12 @@
 import fs from "node:fs";
 
 const HOME = process.env.HOME ?? "";
-const LINKER = `${HOME}/.dotfiles/packages/link-session/src/cli.ts`;
+const HARNESS = process.env.AGENT_HARNESS;
+if (!HARNESS) {
+  console.error("worktree-open: AGENT_HARNESS is not set; point it at the agent-harness clone");
+  process.exit(1);
+}
+const LINKER = `${HARNESS}/claude/tools/link-session/src/cli.ts`;
 
 type Run = { code: number; out: string; err: string };
 function run(cmd: string, args: string[]): Run {
