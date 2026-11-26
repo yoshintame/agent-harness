@@ -78,7 +78,7 @@ Workflow для добавления/изменения клавиатурных
 - **Hammerspoon**: правки в `user/*.lua` или `features/*`. Конфиг перечитывается сам при сохранении (pathwatcher в `init.lua`).
 - **VSCode direct**: правки в `keybindings.json`. Применяется автоматически.
 - **VSCode whichkey**: правки в `settings.json` → `whichkey.bindings`. Применяется автоматически.
-- **Proxy bindings**: правки в `proxy-bindings.yaml` + `dot proxy-bindings` (или `dot rebuild`). Если бинд ещё не записан в самом third-party приложении — Hyper Setup mode (`F18 → u → h`), Tab+key в shortcut-диалоге, обратно `F18 → u → h`.
+- **Proxy bindings**: правки в `proxy-bindings.yaml` + `dot proxy-bindings` (или `dot rebuild`). Если бинд ещё не записан в самом third-party приложении — пользователь нажимает `⌃⌥⇧⌘`+клавишу прямо в его shortcut-диалоге; если Karabiner перехватывает сочетание, на время записи выключить модификации тумблером «Temporarily turns off all Karabiner modifications» в Karabiner-EventViewer. Hyper Setup mode (`F18 → u → h`) удалён — не предлагать.
 
 ### 6. Verify
 
@@ -102,7 +102,7 @@ Workflow для добавления/изменения клавиатурных
 - **AI-биндинги в VSCode** обязательно используют selection-aware команды (`*.focus`, `addToThread`, `insertAtMention`), а не `*.open`. Иначе теряется selection-to-context.
 - **Layout-биндинги в VSCode** — `runCommands` из трёх шагов: `closePanel` → `view.<target>` → reveal активного файла.
 - **Конфликтующие дефолты** снимаются явно: `{ "command": "-<original>" }` рядом с новым биндом или в конце файла.
-- **Third-party приложения** — никогда не лезть руками в их preferences, всё через `proxy-bindings.yaml` + Hyper Setup mode.
+- **Third-party приложения** — никогда не лезть руками в их preferences, всё через `proxy-bindings.yaml` + прямую запись `⌃⌥⇧⌘`-аккорда в shortcut-диалоге.
 
 ## Anti-patterns
 
