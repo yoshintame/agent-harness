@@ -978,9 +978,9 @@ dependencies:
 - repo_url: yoshintame/agent-harness
   name: agent-harness
   host: github.com
-  resolved_commit: 03061243c2192b851f73dec3ead8ad1ca91a69b3
-  resolved_ref: ^1.0.0
-  version: 1.21.0
+  resolved_commit: 9102f406f5eeb906ce0595caa74690bdee800f8a
+  resolved_ref: v1.22.0+9102f40
+  version: 1.22.0+9102f40
   package_type: apm_package
   deployed_files:
   - .agents/skills/actualize
@@ -1408,9 +1408,9 @@ dependencies:
     .agents/skills/analyze-friction/scripts/miner.ts: sha256:7f1b7bb4ba30599395040d26c78fef89cb2f250bdb4473b5f44dff97dd08abcc
     .agents/skills/analyze-permissions/SKILL.md: sha256:b6babc9329cfca9e3646371086f5b47d3482a0387b0f24178fb664eb882321ef
     .agents/skills/analyze-permissions/scripts/analyze-permissions.py: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
-    .agents/skills/artifact/SKILL.md: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+    .agents/skills/artifact/SKILL.md: sha256:abd91bd1da8de99ba097b71c0f9e6cc2024c93a83d76753673eaabba107c3fad
     .agents/skills/artifact/agents/artifact-publisher.json: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
-    .agents/skills/artifact/scripts/artifact-publish: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
+    .agents/skills/artifact/scripts/artifact-publish: sha256:903f60305a1635e77200c40150809437fa5162b4ccc4c1b385cb8ba564373308
     .agents/skills/brew-cask/SKILL.md: sha256:f13b235e1643b9b12397bce9320893b6b82565c4a9479d6cb4704927fc5804a2
     .agents/skills/cc-fork-recover/SKILL.md: sha256:b3c0c9055e3ae2b3ac3b3c9110717046a08b03a443ab051a058241a2ce3d9aa1
     .agents/skills/cc-fork-recover/scripts/cc-fork-recover: sha256:2c386c7bf857a8162c90bc23390dfc51c4c2fd3d9ab21b90b3497e062a40ae8f
@@ -1424,7 +1424,7 @@ dependencies:
     .agents/skills/chromatic/scripts/pairs.ts: sha256:2c07f4420b8935a400c652471c453d7b1597b966d6e7e42a7381b0fee8fa7553
     .agents/skills/create-skill/SKILL.md: sha256:20b71f8096a1d7bf0e692bf6acae05c093a7304fe0f99c015056971acc6b5d95
     .agents/skills/create-skill/scripts/slop-lint.ts: sha256:3c7792eb313fd4d5756f71bf580867a2bbe6813ef75458275ac4c797b249dfbc
-    .agents/skills/deep-research/SKILL.md: sha256:b02cd927092457459615e1140419e20c8a6c20b6203d3f5dd74fef35f6890e22
+    .agents/skills/deep-research/SKILL.md: sha256:322e0ec23c055ee662743b53cd83a28abd233584ef818837bcd2ecff5ae70aca
     .agents/skills/deep-research/references/choice.md: sha256:bb9470a85a677acf287242457bfce2d19f050133ce1707011fc37459819c5ab3
     .agents/skills/deep-research/references/corpus-market.md: sha256:e251626fdf7d3cc192f00876c05cde93225b36677b5d088faf8a61ba4689da1a
     .agents/skills/deep-research/references/corpus-software.md: sha256:1c2231b2229ddd4347f4e566bf9ff614d525854c9ced9f741b3d85db6d2b3eb1
@@ -1558,9 +1558,9 @@ dependencies:
     .claude/skills/analyze-friction/scripts/miner.ts: sha256:7f1b7bb4ba30599395040d26c78fef89cb2f250bdb4473b5f44dff97dd08abcc
     .claude/skills/analyze-permissions/SKILL.md: sha256:b6babc9329cfca9e3646371086f5b47d3482a0387b0f24178fb664eb882321ef
     .claude/skills/analyze-permissions/scripts/analyze-permissions.py: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
-    .claude/skills/artifact/SKILL.md: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+    .claude/skills/artifact/SKILL.md: sha256:abd91bd1da8de99ba097b71c0f9e6cc2024c93a83d76753673eaabba107c3fad
     .claude/skills/artifact/agents/artifact-publisher.json: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
-    .claude/skills/artifact/scripts/artifact-publish: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
+    .claude/skills/artifact/scripts/artifact-publish: sha256:903f60305a1635e77200c40150809437fa5162b4ccc4c1b385cb8ba564373308
     .claude/skills/brew-cask/SKILL.md: sha256:f13b235e1643b9b12397bce9320893b6b82565c4a9479d6cb4704927fc5804a2
     .claude/skills/cc-fork-recover/SKILL.md: sha256:b3c0c9055e3ae2b3ac3b3c9110717046a08b03a443ab051a058241a2ce3d9aa1
     .claude/skills/cc-fork-recover/scripts/cc-fork-recover: sha256:2c386c7bf857a8162c90bc23390dfc51c4c2fd3d9ab21b90b3497e062a40ae8f
@@ -1574,7 +1574,7 @@ dependencies:
     .claude/skills/chromatic/scripts/pairs.ts: sha256:2c07f4420b8935a400c652471c453d7b1597b966d6e7e42a7381b0fee8fa7553
     .claude/skills/create-skill/SKILL.md: sha256:20b71f8096a1d7bf0e692bf6acae05c093a7304fe0f99c015056971acc6b5d95
     .claude/skills/create-skill/scripts/slop-lint.ts: sha256:3c7792eb313fd4d5756f71bf580867a2bbe6813ef75458275ac4c797b249dfbc
-    .claude/skills/deep-research/SKILL.md: sha256:b02cd927092457459615e1140419e20c8a6c20b6203d3f5dd74fef35f6890e22
+    .claude/skills/deep-research/SKILL.md: sha256:322e0ec23c055ee662743b53cd83a28abd233584ef818837bcd2ecff5ae70aca
     .claude/skills/deep-research/references/choice.md: sha256:bb9470a85a677acf287242457bfce2d19f050133ce1707011fc37459819c5ab3
     .claude/skills/deep-research/references/corpus-market.md: sha256:e251626fdf7d3cc192f00876c05cde93225b36677b5d088faf8a61ba4689da1a
     .claude/skills/deep-research/references/corpus-software.md: sha256:1c2231b2229ddd4347f4e566bf9ff614d525854c9ced9f741b3d85db6d2b3eb1
@@ -1698,7 +1698,10 @@ dependencies:
     .claude/skills/wt-workflow/SKILL.md: sha256:dd84e2e58982cb8d20fffa9ce7796d58aec2196267b42a6e7c6b6c4de0453431
     .claude/skills/youtube-summary/SKILL.md: sha256:2e00a437a8b861dac47d4461f1fb712b9822b5261931ff60c738aa4e50834e52
     .claude/skills/youtube-summary/scripts/yt-transcript: sha256:adadfdfc852ff5abb056507c883f467358ff739e7a652cdf756a5d73d0bd2f98
-  content_hash: sha256:6e38194d64bca0a69ce72d144e554271c8c827097a3a0266ed81f78539a48802
+  content_hash: sha256:6263bc96aaedc876fab8aa73ed6407672b586cac4375961f4fb6afdfa6f1ba7b
+  constraint: ^1.0.0
+  resolved_tag: v1.22.0+9102f40
+  resolved_at: '2026-11-26T12:27:26+00:00'
   declared_license: UNLICENSED
 deployments:
 - kind: project-relative
@@ -1844,7 +1847,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+  content_hash: sha256:abd91bd1da8de99ba097b71c0f9e6cc2024c93a83d76753673eaabba107c3fad
 - kind: project-relative
   target: claude
   value: .claude/skills/artifact/agents/artifact-publisher.json
@@ -1862,7 +1865,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
+  content_hash: sha256:903f60305a1635e77200c40150809437fa5162b4ccc4c1b385cb8ba564373308
 - kind: project-relative
   target: claude
   value: .claude/skills/brew-cask
@@ -2078,7 +2081,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:b02cd927092457459615e1140419e20c8a6c20b6203d3f5dd74fef35f6890e22
+  content_hash: sha256:322e0ec23c055ee662743b53cd83a28abd233584ef818837bcd2ecff5ae70aca
 - kind: project-relative
   target: claude
   value: .claude/skills/deep-research/references/choice.md
@@ -5921,7 +5924,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+  content_hash: sha256:abd91bd1da8de99ba097b71c0f9e6cc2024c93a83d76753673eaabba107c3fad
 - kind: project-relative
   target: codex
   value: .agents/skills/artifact/agents/artifact-publisher.json
@@ -5939,7 +5942,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
+  content_hash: sha256:903f60305a1635e77200c40150809437fa5162b4ccc4c1b385cb8ba564373308
 - kind: project-relative
   target: codex
   value: .agents/skills/brew-cask
@@ -6155,7 +6158,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:b02cd927092457459615e1140419e20c8a6c20b6203d3f5dd74fef35f6890e22
+  content_hash: sha256:322e0ec23c055ee662743b53cd83a28abd233584ef818837bcd2ecff5ae70aca
 - kind: project-relative
   target: codex
   value: .agents/skills/deep-research/references/choice.md
