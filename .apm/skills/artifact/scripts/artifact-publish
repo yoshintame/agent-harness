@@ -6,7 +6,7 @@ import { defineCommand, runMain } from "citty@0.2.2"
 const SELF = "artifact-publish"
 const AGENT = "artifact-publisher"
 const AGENTS_FILE = resolve(import.meta.dir, "..", "agents", `${AGENT}.json`)
-const URL_PATTERN = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]+/g
+const URL_PATTERN = /^https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]+$/
 const MAX_BYTES = 16 * 1024 * 1024
 const SPEC_KEYS = ["file", "title", "icon", "description", "url", "files"]
 
@@ -59,7 +59,7 @@ function readSpec(path: string): Spec {
     url: optionalString(record, "url"),
   }
   if (spec.icon !== undefined && !/^[a-z]+$/i.test(spec.icon)) die("spec.icon must be one generic word")
-  if (spec.url !== undefined && !new RegExp(`^${URL_PATTERN.source}$`).test(spec.url)) die(`spec.url is not a claude.ai artifact URL: ${spec.url}`)
+  if (spec.url !== undefined && !URL_PATTERN.test(spec.url)) die(`spec.url is not a claude.ai artifact URL: ${spec.url}`)
   if (spec.url === undefined && spec.icon === undefined) die("spec.icon is required on a first publish (no spec.url)")
 
   if (record.files !== undefined) {
@@ -107,6 +107,20 @@ function buildPrompt(spec: Spec): string {
   ].join("\n")
 }
 
+function publishedUrl(stdout: string): string | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const { is_error: isError, result } = parsed as { is_error?: unknown; result?: unknown }
+  if (isError !== false || typeof result !== "string") return undefined
+  const url = result.trim()
+  return URL_PATTERN.test(url) ? url : undefined
+}
+
 function shellQuote(arg: string): string {
   return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`
 }
@@ -128,6 +142,8 @@ const main = defineCommand({
     const command = [
       "claude",
       "-p",
+      "--output-format",
+      "json",
       "--model",
       args.model,
       "--strict-mcp-config",
@@ -144,21 +160,21 @@ const main = defineCommand({
     ]
 
     if (args["dry-run"]) {
-      process.stdout.write(`cd ${shellQuote(cwd)} && ${command.map(shellQuote).join(" ")}\n`)
+      process.stdout.write(`cd ${shellQuote(cwd)} && AGENT_HARNESS_CHILD=1 ${command.map(shellQuote).join(" ")}\n`)
       return
     }
 
-    const env = { ...process.env }
+    const env: Record<string, string | undefined> = { ...process.env, AGENT_HARNESS_CHILD: "1" }
     delete env.CLAUDE_CODE_DISABLE_ARTIFACT
     const child = Bun.spawnSync(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
     const stdout = child.stdout.toString()
-    const urls = stdout.match(URL_PATTERN)
-    if (child.exitCode !== 0 || urls === null) {
+    const url = child.exitCode === 0 ? publishedUrl(stdout) : undefined
+    if (url === undefined) {
       process.stderr.write(stdout)
       process.stderr.write(child.stderr.toString())
-      die(`no artifact URL from the child (exit ${child.exitCode})`)
+      die(`the child did not reply with exactly one artifact URL (exit ${child.exitCode})`)
     }
-    process.stdout.write(`${urls[urls.length - 1]}\n`)
+    process.stdout.write(`${url}\n`)
   },
 })
 

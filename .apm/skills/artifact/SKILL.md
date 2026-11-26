@@ -9,7 +9,7 @@ An Artifact is a private web page on claude.ai, up to 16MB, that the user opens 
 
 ## Author
 
-1. Read `$AGENT_HARNESS/vendor/claude-code/skills/artifact-design.md` — the built-in page contract and design guidance. If it is missing, run `bun $AGENT_HARNESS/scripts/vendor-claude-code.ts` and read it then.
+1. Read `$AGENT_HARNESS/vendor/claude-code/skills/artifact-design.md` — the built-in page contract and design guidance. If it is missing, stop and ask the user; don't run the vendor scripts yourself.
 2. Write one self-contained `.html` file in the session scratchpad following it. Publish Markdown only when another skill tells you to.
 
 ## Publish

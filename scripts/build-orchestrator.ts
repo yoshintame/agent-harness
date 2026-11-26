@@ -1,13 +1,12 @@
 #!/usr/bin/env bun
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { defineCommand, runMain } from 'citty'
+import { exportDir, mainBranch, orchestratorSentinel, repoRoot, vendorBranch, vendorDir } from './vendor/shared'
 
-const repoRoot = resolve(import.meta.dir, '..')
-const vendorDir = join(repoRoot, 'vendor')
-const systemPromptPath = join(vendorDir, 'claude-code', 'system-prompt.md')
+const systemPromptPath = join(exportDir, 'system-prompt.md')
 const rulesPath = join(repoRoot, 'claude', 'orchestrator', 'rules.md')
-const outPath = join(repoRoot, 'claude', 'agents', 'orchestrator.md')
+export const orchestratorPath = join(repoRoot, 'claude', 'agents', 'orchestrator.md')
 
 const frontmatter = [
   '---',
@@ -16,6 +15,8 @@ const frontmatter = [
   '---',
 ].join('\n')
 
+export class BuildError extends Error {}
+
 function trimBlankLines(text: string): string {
   const lines = text.split('\n')
   while (lines.length > 0 && lines[0]!.trim() === '') lines.shift()
@@ -23,10 +24,22 @@ function trimBlankLines(text: string): string {
   return lines.join('\n')
 }
 
-function vendorBranch(): string | undefined {
-  if (!existsSync(join(vendorDir, '.git'))) return undefined
-  const result = Bun.spawnSync(['git', '-C', vendorDir, 'rev-parse', '--abbrev-ref', 'HEAD'], { stdout: 'pipe', stderr: 'pipe' })
-  return result.exitCode === 0 ? result.stdout.toString().trim() : 'unknown'
+export function buildOrchestrator(): { path: string; bytes: number } {
+  if (!existsSync(systemPromptPath)) {
+    throw new BuildError(`missing ${relative(repoRoot, systemPromptPath)}: run \`bun scripts/vendor-claude-code.ts\` first`)
+  }
+  const branch = vendorBranch()
+  if (branch !== undefined && branch !== mainBranch) {
+    throw new BuildError(`${relative(repoRoot, vendorDir)} is on ${branch}: the orchestrator is built from its ${mainBranch} branch, switch back first`)
+  }
+  const systemPrompt = trimBlankLines(readFileSync(systemPromptPath, 'utf8'))
+  const rules = trimBlankLines(readFileSync(rulesPath, 'utf8'))
+  const text = `${frontmatter}\n\n${orchestratorSentinel}\n\n${systemPrompt}\n\n${rules}\n`
+  mkdirSync(dirname(orchestratorPath), { recursive: true })
+  writeFileSync(orchestratorPath, text)
+  const bytes = Buffer.byteLength(text)
+  console.log(`wrote ${relative(repoRoot, orchestratorPath)} (${bytes} bytes)`)
+  return { path: orchestratorPath, bytes }
 }
 
 const main = defineCommand({
@@ -35,22 +48,14 @@ const main = defineCommand({
     description: 'Build the gitignored claude/agents/orchestrator.md from the vendored system prompt and claude/orchestrator/rules.md',
   },
   run() {
-    if (!existsSync(systemPromptPath)) {
-      console.error(`missing ${relative(repoRoot, systemPromptPath)}: run \`bun scripts/vendor-claude-code.ts\` first`)
+    try {
+      buildOrchestrator()
+    } catch (error) {
+      if (!(error instanceof BuildError)) throw error
+      console.error(error.message)
       process.exit(1)
     }
-    const branch = vendorBranch()
-    if (branch !== undefined && branch !== 'main') {
-      console.error(`${relative(repoRoot, vendorDir)} is on ${branch}: the orchestrator is built from its main branch, switch back first`)
-      process.exit(1)
-    }
-    const systemPrompt = trimBlankLines(readFileSync(systemPromptPath, 'utf8'))
-    const rules = trimBlankLines(readFileSync(rulesPath, 'utf8'))
-    const text = `${frontmatter}\n\n${systemPrompt}\n\n${rules}\n`
-    mkdirSync(dirname(outPath), { recursive: true })
-    writeFileSync(outPath, text)
-    console.log(`wrote ${relative(repoRoot, outPath)} (${Buffer.byteLength(text)} bytes)`)
   },
 })
 
-await runMain(main)
+if (import.meta.main) await runMain(main)

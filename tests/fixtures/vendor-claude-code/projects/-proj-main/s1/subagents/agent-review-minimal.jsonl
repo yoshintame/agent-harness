@@ -1,0 +1,2 @@
+{"type":"user","version":"2.1.322","message":{"role":"user","content":"Review target: the current branch\n\n`minimal prompt → single careful diff pass → ≤15 findings`\n\nYou are reviewing a pull request.\n\n"}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"You are an agent for Claude Code, reviewer copy."}],"tools":[{"name":"Bash"}]}}
