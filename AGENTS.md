@@ -38,7 +38,9 @@ several skills, hooks or services.
 `vendor/claude-code/` is generated from local Claude Code session transcripts by
 `bun scripts/vendor-claude-code.ts` (system prompt, built-in general-purpose
 subagent prompt, `/code-review` and `/security-review` recipes, the built-in
-`artifact-*` skill texts) for reference and diffing. `vendor/` is gitignored
+`artifact-*` skill texts) for reference and diffing. Its modules live in
+`scripts/vendor/`; `--dry-run [--out <dir>]` writes a plain export elsewhere and
+leaves `vendor/` alone. `vendor/` is gitignored
 because the texts are Anthropic's proprietary content: never commit them here.
 
 On this Mac `vendor/` is a clone of the private `yoshintame/claude-code-vendor`
@@ -54,8 +56,15 @@ other install) the script just writes a plain upstream export into
 
 `scripts/build-orchestrator.ts` builds the gitignored `claude/agents/orchestrator.md`
 from `vendor/claude-code/system-prompt.md` (the `main` branch when `vendor/` is a
-clone) and `claude/orchestrator/rules.md`. The `SessionStart` hook
-`claude/hooks/orchestrator-refresh.sh` notices a new `claude --version`, runs
-`vendor-claude-code.ts --capture` and `build-orchestrator.ts` in the background
-(log: `~/.claude/logs/orchestrator-refresh.log`) and reports the result in the
-next session. After a rules change run `build-orchestrator.ts` by hand.
+clone) and `claude/orchestrator/rules.md`, and marks it with the sentinel line
+`<!-- agent-harness:orchestrator -->` so the transcript scan skips its prompt. The
+`SessionStart` hook `claude/hooks/orchestrator-refresh.sh` notices a new
+`claude --version` and starts `scripts/refresh-orchestrator.ts` in the background
+once per version (log: `~/.claude/logs/orchestrator-refresh.log`); that script
+checks the vendor clone, captures the prompt with the main session's model,
+merges and rebuilds, and leaves a result the hook reports in the next session.
+After a rules change run `build-orchestrator.ts` by hand.
+
+Every headless `claude` child the harness spawns (the capture session,
+`artifact-publish`) gets `AGENT_HARNESS_CHILD=1`; the refresh hook exits at once
+when it is set.
