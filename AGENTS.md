@@ -38,8 +38,24 @@ several skills, hooks or services.
 `vendor/claude-code/` is generated from local Claude Code session transcripts by
 `bun scripts/vendor-claude-code.ts` (system prompt, built-in general-purpose
 subagent prompt, `/code-review` and `/security-review` recipes, the built-in
-`artifact-*` skill texts) for reference and diffing. It is gitignored because the
-texts are Anthropic's proprietary content: never commit them. Re-run the script after a Claude Code update.
+`artifact-*` skill texts) for reference and diffing. `vendor/` is gitignored
+because the texts are Anthropic's proprietary content: never commit them here.
+
+On this Mac `vendor/` is a clone of the private `yoshintame/claude-code-vendor`
+(vendor-branch scheme). Branch `upstream` holds one commit per Claude Code
+version with the export as is; branch `main` — the checked-out one — holds my
+edits to `claude-code/system-prompt.md`, made as ordinary commits. The script
+writes the export onto `upstream` through a temporary worktree, commits
+`upstream: Claude Code <version>` if anything changed and merges `upstream` into
+`main`; on a conflict it aborts the merge, leaves `main` untouched and exits
+non-zero — resolve with `git -C vendor merge upstream`. Without the clone (any
+other install) the script just writes a plain upstream export into
+`vendor/claude-code/`.
+
 `scripts/build-orchestrator.ts` builds the gitignored `claude/agents/orchestrator.md`
-from the vendored system prompt and `claude/orchestrator/rules.md`; re-run both
-after a Claude Code update or a rules change.
+from `vendor/claude-code/system-prompt.md` (the `main` branch when `vendor/` is a
+clone) and `claude/orchestrator/rules.md`. The `SessionStart` hook
+`claude/hooks/orchestrator-refresh.sh` notices a new `claude --version`, runs
+`vendor-claude-code.ts --capture` and `build-orchestrator.ts` in the background
+(log: `~/.claude/logs/orchestrator-refresh.log`) and reports the result in the
+next session. After a rules change run `build-orchestrator.ts` by hand.
