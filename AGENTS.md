@@ -1,4 +1,4 @@
-# agent-skills
+# agent-harness
 
 Personal cross-provider skill package (Claude Code, Codex, Cursor), distributed
 by APM. Source of truth is `.apm/skills/<name>/`. The trees under
@@ -20,9 +20,9 @@ into place through the `agent-harness` nixLink root; the originals live here.
 
 - `apm.yml`, `.apm/skills/<name>/`, `.apm/prompts/` — the APM skill package.
 - `shared/` — used by both Claude Code and Codex: `apm/` (global APM manifest
-  and lock), `instructions/` (`AGENTS.md`, `dev-profile.md`), `hooks/`, `tools/`.
+  and lock), `instructions/AGENTS.md`, `hooks/`, `tools/`.
 - `claude/` — Claude Code only: `settings.json`, `agent.gitconfig`, `agents/`,
-  `hooks/` (with `hooks/lib/`), `tools/`.
+  `instructions/dev-profile.md`, `hooks/` (with `hooks/lib/`), `tools/`.
 - `codex/` — Codex only: `config.toml`, `rules/`.
 - `scripts/`, `tests/`, `package.json` — repo-level tooling and tests.
 
