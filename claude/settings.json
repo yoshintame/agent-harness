@@ -20,7 +20,9 @@
     "OTEL_LOG_USER_PROMPTS": "1",
     "OTEL_LOG_ASSISTANT_RESPONSES": "1",
     "OTEL_LOG_TOOL_DETAILS": "1",
-    "OTEL_LOG_TOOL_CONTENT": "1"
+    "OTEL_LOG_TOOL_CONTENT": "1",
+    "CLAUDE_CODE_DISABLE_ARTIFACT": "1",
+    "CLAUDE_CODE_DISABLE_WORKFLOWS": "1"
   },
   "includeCoAuthoredBy": false,
   "permissions": {
