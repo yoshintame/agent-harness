@@ -20,10 +20,15 @@ into place through the `agent-harness` nixLink root; the originals live here.
 
 - `apm.yml`, `.apm/skills/<name>/`, `.apm/prompts/` — the APM skill package.
 - `shared/` — used by both Claude Code and Codex: `apm/` (global APM manifest
-  and lock), `instructions/AGENTS.md`, `hooks/`, `tools/`.
-- `claude/` — Claude Code only: `settings.json`, `agent.gitconfig`, `agents/`,
+  and lock), `hooks/`, `tools/`.
+- `claude/` — Claude Code only: `settings.json` (main session runs as the
+  `orchestrator` agent), `agent.gitconfig`, `agents/` (`general-purpose`
+  overrides the built-in default subagent), `orchestrator/rules.md`,
   `instructions/dev-profile.md`, `hooks/` (with `hooks/lib/`), `tools/`.
-- `codex/` — Codex only: `config.toml`, `rules/`.
+  There is no global `CLAUDE.md`: orchestrator rules live in its agent,
+  executor rules in `general-purpose`.
+- `codex/` — Codex only: `config.toml`, `rules/`, `instructions/AGENTS.md`
+  (linked as `~/.codex/AGENTS.md`).
 - `scripts/`, `tests/`, `package.json` — repo-level tooling and tests.
 
 Vendor dirs (`claude/`, `codex/`, `shared/`) sit at the top. A script used by
