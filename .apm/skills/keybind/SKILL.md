@@ -55,9 +55,9 @@ Workflow для добавления/изменения клавиатурных
 
 | Layer | Что проверять |
 |---|---|
-| Karabiner (все слои) | Репо `karabiner-config` (клон — сабмодуль `~/.dotfiles/modules/home/karabiner/config`): `src/keymap/<слой>.ts` (`base`, `hyper`, `tab`, `rcmd`, `slash`; реестр слоёв — `layers.ts`) и `src/actions.ts` (action-имена). |
-| Hammerspoon leader (`F18 → ...`) | `~/.dotfiles/modules/home/hammerspoon/config/user/leader.lua`. |
-| Hammerspoon App Launcher и direct | `~/.dotfiles/modules/home/hammerspoon/config/user/direct.lua` (`launcher` — `Alt+<letter>`, `binds`, `proxy`); фичи с модальными клавишами — `user/features.lua`. |
+| Karabiner (все слои) | Репо `karabiner-config` (клон `~/Development/yoshintame/karabiner-config`): `src/keymap/<слой>.ts` (`base`, `hyper`, `tab`, `rcmd`, `slash`; реестр слоёв — `layers.ts`) и `src/actions.ts` (action-имена). |
+| Hammerspoon leader (`F18 → ...`) | Репо `hammerspoon-config` (клон `~/Development/yoshintame/hammerspoon-config`): `user/leader.lua`. |
+| Hammerspoon App Launcher и direct | `hammerspoon-config`: `user/direct.lua` (`launcher` — `Alt+<letter>`, `binds`, `proxy`); фичи с модальными клавишами — `user/features.lua`. |
 | VSCode direct | `~/.dotfiles/modules/home/vscode/config/keybindings.json` — собственные бинды + снятые конфликты. Плюс дефолты VSCode/Cursor (если бинд не `cmd+...`, проверить, занят ли он расширением). |
 | VSCode whichkey (leader) | `~/.dotfiles/modules/home/vscode/config/settings.json` → поле `whichkey.bindings`. |
 | Proxy bindings (третьи приложения) | `~/.dotfiles/modules/shared/proxy-bindings.yaml`. |
@@ -75,7 +75,7 @@ Workflow для добавления/изменения клавиатурных
 В зависимости от уровня:
 
 - **Karabiner**: правки в `src/keymap/<слой>.ts` (binding) и `src/actions.ts` (если новый action), раскладка и порядок сборки — в `AGENTS.md` репо. `bun run build` пишет живой `build/karabiner.json` — в worktree собирать и проверять через `bun src/index.ts --dry-run` / `bun test`.
-- **Hammerspoon**: правки в `user/*.lua` или `features/*`. Конфиг перечитывается сам при сохранении (pathwatcher в `init.lua`).
+- **Hammerspoon**: правки в `user/*.lua` или `features/*`. Конфиг перечитывается сам при сохранении в клоне (pathwatcher в `init.lua`); worktree проверять через `dot dev hs`, проверки и порядок — в `AGENTS.md` репо.
 - **VSCode direct**: правки в `keybindings.json`. Применяется автоматически.
 - **VSCode whichkey**: правки в `settings.json` → `whichkey.bindings`. Применяется автоматически.
 - **Proxy bindings**: правки в `proxy-bindings.yaml` + `dot proxy-bindings` (или `dot rebuild`). Если бинд ещё не записан в самом third-party приложении — пользователь нажимает `⌃⌥⇧⌘`+клавишу прямо в его shortcut-диалоге; если Karabiner перехватывает сочетание, на время записи выключить модификации тумблером «Temporarily turns off all Karabiner modifications» в Karabiner-EventViewer. Hyper Setup mode (`F18 → u → h`) удалён — не предлагать.
