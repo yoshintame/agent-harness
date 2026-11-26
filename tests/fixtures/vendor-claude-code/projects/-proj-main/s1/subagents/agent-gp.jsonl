@@ -1,0 +1,2 @@
+{"type":"user","version":"2.1.322","message":{"role":"user","content":"Fix the bug in app.ts"}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"You are an agent for Claude Code, Anthropic's official CLI.\n\nDo the task.\n\n"}],"tools":[{"name":"Bash"}]}}

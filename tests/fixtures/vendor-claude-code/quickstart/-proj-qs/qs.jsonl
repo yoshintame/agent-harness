@@ -1,0 +1,2 @@
+{"type":"assistant","version":"2.1.322","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_qs","name":"Artifact","input":{"action":"quickstart"}}]}}
+{"type":"user","version":"2.1.322","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_qs","content":[{"type":"text","text":"Quickstart. This one result stands in for listing.\n\n## Page contract\n\nDesign from quickstart.\n\n[Design systems this user can open are listed below.]\n"}]}]}}

@@ -1,0 +1,11 @@
+{"type":"user","version":"2.1.322","message":{"role":"user","content":"hi"}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"You are the main prompt."},{"text":"Second block.\n<total_tokens>1000</total_tokens>\nTail line."}],"tools":[{"name":"Agent"},{"name":"Bash"},{"name":"Skill"}]}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"<!-- agent-harness:orchestrator -->\n\nOrchestrator prompt."}],"tools":[{"name":"Agent"},{"name":"Skill"}]}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"Old orchestrator.\n\n# Правила оркестратора\n\nRules."}],"tools":[{"name":"Agent"},{"name":"Skill"}]}}
+{"type":"api-request-shape","version":"2.1.322","shape":{"system":[{"text":"billing header"},{"text":"Headless prompt."}],"tools":[{"name":"Bash"}]}}
+{"type":"assistant","version":"2.1.322","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_sec","name":"Skill","input":{"skill":"security-review"}}]}}
+{"type":"user","version":"2.1.322","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sec","content":"Launching skill: security-review"}]}}
+{"type":"user","version":"2.1.322","isMeta":true,"sourceToolUseID":"toolu_sec","message":{"role":"user","content":[{"type":"text","text":"You are a senior security engineer.\n\nGIT STATUS:\n\n```\n## feature\n M app.ts\n```\n\nDIFF CONTENT:\n\n```\ndiff --git a/app.ts b/app.ts\n+secret\n```\n\nReview the complete diff above. This contains all code changes.\n\nOBJECTIVE:\nFind bugs.\n\n"}]}}
+{"type":"assistant","version":"2.1.322","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_skill","name":"Skill","input":{"skill":"artifact-design"}}]}}
+{"type":"user","version":"2.1.322","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_skill","content":"Launching skill: artifact-design"}]}}
+{"type":"user","version":"2.1.322","isMeta":true,"sourceToolUseID":"toolu_skill","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /skills/artifact-design\n\n## Page contract\n\nDesign from the skill.\n"}]}}
