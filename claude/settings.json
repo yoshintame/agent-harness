@@ -394,5 +394,6 @@
     "/Users/yoshintame/.dotfiles",
     "/Users/yoshintame/.local/share/worktrees",
     "/Users/yoshintame/Documents/obsidian/yoshintame"
-  ]
+  ],
+  "agent": "orchestrator"
 }
