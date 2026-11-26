@@ -23,7 +23,8 @@ function trimBlankLines(text: string): string {
 }
 
 function processSystemPrompt(text: string): string {
-  const kept = text.split('\n').filter((line) => !line.startsWith(' - If the user asks about "ultrareview"'))
+  const dropped = [' - If the user asks about "ultrareview"', 'To make a small change to an artifact you already published']
+  const kept = text.split('\n').filter((line) => !dropped.some((prefix) => line.startsWith(prefix)))
   return trimBlankLines(kept.join('\n'))
 }
 
