@@ -1,0 +1,165 @@
+#!/usr/bin/env -S bun --install=fallback
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { dirname, isAbsolute, resolve, sep } from "node:path"
+import { defineCommand, runMain } from "citty@0.2.2"
+
+const SELF = "artifact-publish"
+const AGENT = "artifact-publisher"
+const AGENTS_FILE = resolve(import.meta.dir, "..", "agents", `${AGENT}.json`)
+const URL_PATTERN = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]+/g
+const MAX_BYTES = 16 * 1024 * 1024
+const SPEC_KEYS = ["file", "title", "icon", "description", "url", "files"]
+
+interface Spec {
+  file: string
+  title?: string
+  icon?: string
+  description?: string
+  url?: string
+  files?: Record<string, string>
+}
+
+function die(msg: string): never {
+  process.stderr.write(`${SELF}: ${msg}\n`)
+  process.exit(1)
+}
+
+function optionalString(raw: Record<string, unknown>, key: string): string | undefined {
+  const value = raw[key]
+  if (value === undefined) return undefined
+  if (typeof value !== "string" || value.trim() === "") die(`spec.${key} must be a non-empty string`)
+  return value
+}
+
+function existingFile(path: string, label: string): void {
+  if (!isAbsolute(path)) die(`${label} must be an absolute path: ${path}`)
+  if (!existsSync(path) || !statSync(path).isFile()) die(`${label} is not a file: ${path}`)
+  if (statSync(path).size > MAX_BYTES) die(`${label} is over 16MB: ${path}`)
+}
+
+function readSpec(path: string): Spec {
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"))
+  } catch (error) {
+    die(`cannot read spec ${path}: ${(error as Error).message}`)
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) die("spec must be a JSON object")
+  const record = raw as Record<string, unknown>
+  const unknown = Object.keys(record).filter((key) => !SPEC_KEYS.includes(key))
+  if (unknown.length > 0) die(`unknown spec fields: ${unknown.join(", ")}`)
+
+  const file = optionalString(record, "file") ?? die("spec.file is required")
+  existingFile(file, "spec.file")
+  const spec: Spec = {
+    file,
+    title: optionalString(record, "title"),
+    icon: optionalString(record, "icon"),
+    description: optionalString(record, "description"),
+    url: optionalString(record, "url"),
+  }
+  if (spec.icon !== undefined && !/^[a-z]+$/i.test(spec.icon)) die("spec.icon must be one generic word")
+  if (spec.url !== undefined && !new RegExp(`^${URL_PATTERN.source}$`).test(spec.url)) die(`spec.url is not a claude.ai artifact URL: ${spec.url}`)
+  if (spec.url === undefined && spec.icon === undefined) die("spec.icon is required on a first publish (no spec.url)")
+
+  if (record.files !== undefined) {
+    const files = record.files
+    if (typeof files !== "object" || files === null || Array.isArray(files)) die("spec.files must map published paths to absolute source paths")
+    spec.files = {}
+    for (const [published, source] of Object.entries(files)) {
+      if (typeof source !== "string") die(`spec.files["${published}"] must be a path string`)
+      existingFile(source, `spec.files["${published}"]`)
+      spec.files[published] = source
+    }
+  }
+  return spec
+}
+
+function commonDir(paths: string[]): string {
+  const split = paths.map((path) => dirname(path).split(sep))
+  const common: string[] = []
+  for (let index = 0; index < split[0]!.length; index++) {
+    const part = split[0]![index]!
+    if (split.every((parts) => parts[index] === part)) common.push(part)
+    else break
+  }
+  return common.join(sep) || sep
+}
+
+function publishInput(spec: Spec): Record<string, unknown> {
+  const input: Record<string, unknown> = { action: "publish", file_path: spec.file }
+  if (spec.url) input.url = spec.url
+  if (spec.title) input.title = spec.title
+  if (spec.icon) input.icon = spec.icon
+  if (spec.description) input.description = spec.description
+  if (spec.files) input.files = spec.files
+  return input
+}
+
+function buildPrompt(spec: Spec): string {
+  const steps: string[] = []
+  if (spec.url) steps.push(`1. Call Artifact with ${JSON.stringify({ action: "read", url: spec.url })}.`)
+  steps.push(`${steps.length + 1}. Call Artifact with ${JSON.stringify(publishInput(spec))}.`)
+  return [
+    `Publish the finished page ${spec.file} as is.`,
+    ...steps,
+    "Reply with only the artifact URL.",
+  ].join("\n")
+}
+
+function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`
+}
+
+const main = defineCommand({
+  meta: {
+    name: SELF,
+    description: "Publish a finished local page as a claude.ai Artifact through a narrow headless Claude Code child",
+  },
+  args: {
+    spec: { type: "positional", description: "Path to the JSON spec", required: true },
+    "dry-run": { type: "boolean", description: "Print the child command instead of running it", default: false },
+    model: { type: "string", description: "Model of the child session", default: "haiku" },
+  },
+  async run({ args }) {
+    if (!existsSync(AGENTS_FILE)) die(`missing agent definition: ${AGENTS_FILE}`)
+    const spec = readSpec(resolve(args.spec))
+    const cwd = commonDir([spec.file, ...Object.values(spec.files ?? {})])
+    const command = [
+      "claude",
+      "-p",
+      "--model",
+      args.model,
+      "--strict-mcp-config",
+      "--settings",
+      JSON.stringify({ env: { CLAUDE_CODE_DISABLE_ARTIFACT: "", CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" } }),
+      "--disallowedTools",
+      "ArtifactComments",
+      "ArtifactData",
+      "--agents",
+      AGENTS_FILE,
+      "--agent",
+      AGENT,
+      buildPrompt(spec),
+    ]
+
+    if (args["dry-run"]) {
+      process.stdout.write(`cd ${shellQuote(cwd)} && ${command.map(shellQuote).join(" ")}\n`)
+      return
+    }
+
+    const env = { ...process.env }
+    delete env.CLAUDE_CODE_DISABLE_ARTIFACT
+    const child = Bun.spawnSync(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+    const stdout = child.stdout.toString()
+    const urls = stdout.match(URL_PATTERN)
+    if (child.exitCode !== 0 || urls === null) {
+      process.stderr.write(stdout)
+      process.stderr.write(child.stderr.toString())
+      die(`no artifact URL from the child (exit ${child.exitCode})`)
+    }
+    process.stdout.write(`${urls[urls.length - 1]}\n`)
+  },
+})
+
+await runMain(main)
