@@ -1,6 +1,6 @@
 node_modules/
 apm_modules/
-apm.lock.yaml
+/apm.lock.yaml
 
 # APM-generated materialized copies
 .claude/skills/
@@ -10,3 +10,6 @@ apm.lock.yaml
 # APM pack output
 .claude-plugin/
 build/
+
+# Claude permission analyzer backups
+/claude/settings.backup-*.json

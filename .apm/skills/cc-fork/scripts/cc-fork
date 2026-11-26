@@ -1,0 +1,257 @@
+#!/usr/bin/env bun
+import { forkSession } from "@anthropic-ai/claude-agent-sdk"
+import { readdirSync, readFileSync, existsSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { defineCommand, runMain } from "citty"
+
+const SELF = "cc-fork"
+const PROJECTS = join(homedir(), ".claude", "projects")
+
+function die(msg: string): never {
+  process.stderr.write(`${SELF}: ${msg}\n`)
+  process.exit(1)
+}
+
+function projectDirs(): string[] {
+  return readdirSync(PROJECTS, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => join(PROJECTS, d.name))
+}
+
+function findSession(sessionId: string): { path: string; projectDir: string } | null {
+  for (const dir of projectDirs()) {
+    const path = join(dir, `${sessionId}.jsonl`)
+    try {
+      readFileSync(path, { flag: "r" })
+      return { path, projectDir: dir }
+    } catch {}
+  }
+  return null
+}
+
+function extractCwd(jsonlPath: string): string | null {
+  const content = readFileSync(jsonlPath, "utf8")
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line)
+      if (entry.cwd) return entry.cwd
+    } catch {}
+  }
+  return null
+}
+
+type UserTurn = {
+  uuid: string
+  timestamp: string
+  text: string
+  index: number
+}
+
+function extractUserTurns(jsonlPath: string): UserTurn[] {
+  const content = readFileSync(jsonlPath, "utf8")
+  const turns: UserTurn[] = []
+  let idx = 0
+
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line)
+      if (entry.type !== "user" || entry.isSidechain) continue
+
+      let text = ""
+      const msg = entry.message
+      if (msg?.content) {
+        if (typeof msg.content === "string") {
+          text = msg.content
+        } else if (Array.isArray(msg.content)) {
+          text = msg.content
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join(" ")
+        }
+      }
+
+      text = text.replace(/\s+/g, " ").trim()
+      if (!text) continue
+
+      turns.push({ uuid: entry.uuid, timestamp: entry.timestamp, text, index: idx++ })
+    } catch {}
+  }
+
+  return turns
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, "0")
+  return `${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function currentSessionId(): string | null {
+  return process.env.CLAUDE_CODE_SESSION_ID ?? null
+}
+
+async function pickMessage(turns: UserTurn[]): Promise<string> {
+  const lines = turns.map(
+    (t) => `${t.uuid}\t${formatTime(t.timestamp)}\t${t.text.slice(0, 120)}`
+  )
+  const input = lines.join("\n")
+
+  const proc = Bun.spawn(["fzf", "--height=40%", "--reverse", "--with-nth=2..", "--delimiter=\t", "--no-multi", "--prompt=Fork after ▸ "], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "inherit",
+  })
+
+  proc.stdin.write(input)
+  proc.stdin.end()
+
+  const output = await new Response(proc.stdout).text()
+  const code = await proc.exited
+  if (code !== 0) die("cancelled")
+
+  const uuid = output.trim().split("\t")[0]
+  if (!uuid) die("no message selected")
+  return uuid
+}
+
+async function paseoImport(sessionId: string, cwd: string, title?: string): Promise<string | null> {
+  try {
+    const proc = Bun.spawn(["paseo", "import", sessionId, "--provider", "claude", "--cwd", cwd, "--json"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    const out = await new Response(proc.stdout).text()
+    const code = await proc.exited
+
+    if (code !== 0) {
+      const err = await new Response(proc.stderr).text()
+      process.stderr.write(`${SELF}: paseo import failed: ${err.trim()}\n`)
+      return null
+    }
+
+    let agentId: string | null = null
+    try {
+      const data = JSON.parse(out)
+      agentId = data.id ?? data.agentId ?? null
+    } catch {
+      const match = out.match(/[a-f0-9-]{36}/)
+      agentId = match?.[0] ?? null
+    }
+
+    if (agentId && title) {
+      const rename = Bun.spawn(["paseo", "agent", "update", agentId, "--name", title], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      await rename.exited
+    }
+
+    return agentId
+  } catch {
+    return null
+  }
+}
+
+const main = defineCommand({
+  meta: { name: SELF, description: "Lossless fork of a Claude Code session from a specific message" },
+  args: {
+    session: {
+      type: "positional",
+      description: "Session UUID to fork (default: current session via $CLAUDE_CODE_SESSION_ID)",
+      required: false,
+    },
+    message: {
+      type: "string",
+      alias: "m",
+      description: "Message UUID to fork up to (inclusive). Omit for interactive picker.",
+    },
+    "match-text": {
+      type: "string",
+      description: "Find message by text substring match (first 80+ chars of user message). Resolves to UUID internally.",
+    },
+    title: {
+      type: "string",
+      alias: "t",
+      description: "Custom title for the forked session",
+    },
+    resume: {
+      type: "boolean",
+      alias: "r",
+      description: "Print `claude --resume <id>` command instead of just the session ID",
+      default: false,
+    },
+    workspace: {
+      type: "string",
+      alias: "w",
+      description: "Paseo workspace ID for import (default: auto-resolve from $PASEO_WORKSPACE_ID or source agent)",
+    },
+    "no-paseo": {
+      type: "boolean",
+      description: "Skip Paseo import",
+      default: false,
+    },
+  },
+  async run({ args }) {
+    const sessionId = args.session || currentSessionId()
+    if (!sessionId) die("no session ID — pass as argument or set $CLAUDE_CODE_SESSION_ID")
+
+    const found = findSession(sessionId)
+    if (!found) die(`session ${sessionId} not found in ${PROJECTS}`)
+
+    const { path: jsonlPath, projectDir } = found
+
+    let messageId = args.message as string | undefined
+
+    if (!messageId && args["match-text"]) {
+      const needle = (args["match-text"] as string).replace(/\s+/g, " ").trim()
+      if (!needle) die("--match-text is empty")
+      const turns = extractUserTurns(jsonlPath)
+      const match = turns.find((t) => t.text.includes(needle))
+      if (!match) die(`no user message matching: ${needle.slice(0, 80)}…`)
+      messageId = match.uuid
+      process.stderr.write(`${SELF}: matched message ${messageId} (${formatTime(match.timestamp)}): ${match.text.slice(0, 60)}…\n`)
+    }
+
+    if (!messageId) {
+      const turns = extractUserTurns(jsonlPath)
+      if (turns.length === 0) die("session has no user messages")
+      messageId = await pickMessage(turns)
+    }
+
+    const forkOpts: { upToMessageId: string; title?: string } = { upToMessageId: messageId }
+    if (args.title) forkOpts.title = args.title as string
+
+    const result = await forkSession(sessionId, forkOpts)
+    const forkedId = result.sessionId
+
+    process.stderr.write(`${SELF}: forked → ${forkedId}\n`)
+
+    if (!args["no-paseo"]) {
+      const cwd = extractCwd(jsonlPath)
+
+      if (cwd && existsSync(cwd)) {
+        const forkTitle = args.title as string | undefined
+        const agentId = await paseoImport(forkedId, cwd, forkTitle)
+        if (agentId) {
+          process.stderr.write(`${SELF}: imported into Paseo → ${agentId}\n`)
+        } else {
+          process.stderr.write(`${SELF}: Paseo import failed, session still available via claude --resume ${forkedId}\n`)
+        }
+      } else {
+        process.stderr.write(`${SELF}: could not resolve cwd from session, skipping Paseo import\n`)
+      }
+    }
+
+    if (args.resume) {
+      process.stdout.write(`claude --resume ${forkedId}\n`)
+    } else {
+      process.stdout.write(`${forkedId}\n`)
+    }
+  },
+})
+
+runMain(main)
