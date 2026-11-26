@@ -978,9 +978,9 @@ dependencies:
 - repo_url: yoshintame/agent-harness
   name: agent-harness
   host: github.com
-  resolved_commit: 88231be6d9d1cf0a8aa38cc74f0d56f2d3d43117
-  resolved_ref: v1.20.0+88231be
-  version: 1.20.0+88231be
+  resolved_commit: 03061243c2192b851f73dec3ead8ad1ca91a69b3
+  resolved_ref: ^1.0.0
+  version: 1.21.0
   package_type: apm_package
   deployed_files:
   - .agents/skills/actualize
@@ -996,6 +996,10 @@ dependencies:
   - .agents/skills/analyze-permissions
   - .agents/skills/analyze-permissions/SKILL.md
   - .agents/skills/analyze-permissions/scripts/analyze-permissions.py
+  - .agents/skills/artifact
+  - .agents/skills/artifact/SKILL.md
+  - .agents/skills/artifact/agents/artifact-publisher.json
+  - .agents/skills/artifact/scripts/artifact-publish
   - .agents/skills/brew-cask
   - .agents/skills/brew-cask/SKILL.md
   - .agents/skills/cc-fork
@@ -1200,6 +1204,10 @@ dependencies:
   - .claude/skills/analyze-permissions
   - .claude/skills/analyze-permissions/SKILL.md
   - .claude/skills/analyze-permissions/scripts/analyze-permissions.py
+  - .claude/skills/artifact
+  - .claude/skills/artifact/SKILL.md
+  - .claude/skills/artifact/agents/artifact-publisher.json
+  - .claude/skills/artifact/scripts/artifact-publish
   - .claude/skills/brew-cask
   - .claude/skills/brew-cask/SKILL.md
   - .claude/skills/cc-fork
@@ -1400,6 +1408,9 @@ dependencies:
     .agents/skills/analyze-friction/scripts/miner.ts: sha256:7f1b7bb4ba30599395040d26c78fef89cb2f250bdb4473b5f44dff97dd08abcc
     .agents/skills/analyze-permissions/SKILL.md: sha256:b6babc9329cfca9e3646371086f5b47d3482a0387b0f24178fb664eb882321ef
     .agents/skills/analyze-permissions/scripts/analyze-permissions.py: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
+    .agents/skills/artifact/SKILL.md: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+    .agents/skills/artifact/agents/artifact-publisher.json: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
+    .agents/skills/artifact/scripts/artifact-publish: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
     .agents/skills/brew-cask/SKILL.md: sha256:f13b235e1643b9b12397bce9320893b6b82565c4a9479d6cb4704927fc5804a2
     .agents/skills/cc-fork-recover/SKILL.md: sha256:b3c0c9055e3ae2b3ac3b3c9110717046a08b03a443ab051a058241a2ce3d9aa1
     .agents/skills/cc-fork-recover/scripts/cc-fork-recover: sha256:2c386c7bf857a8162c90bc23390dfc51c4c2fd3d9ab21b90b3497e062a40ae8f
@@ -1482,7 +1493,7 @@ dependencies:
     .agents/skills/homelab-add-service/scripts/compose-to-homelab.ts: sha256:8b8e89f9db9c02496cbf8576101fa85ccd65952b2ab2438d2e34549285fe8233
     .agents/skills/homelab-add-service/scripts/convert.ts: sha256:92617eaa4641a990319d71cc7394f7417da85e2e59e2a2c5472ff614992f1ba0
     .agents/skills/homelab-deploy/SKILL.md: sha256:490134dadf01bf74b95ca3b3a3ad565e7b94b1fd21543c4df1a678807540220f
-    .agents/skills/keybind/SKILL.md: sha256:af46121f4b01f44fe95cfcc5b809e159b4c7a154f068421f2be8e00c0179db70
+    .agents/skills/keybind/SKILL.md: sha256:e24f11028f81e4309c02b512ff3a263701a5e1b26cbd79d404bf4556c2ee7d94
     .agents/skills/keyswitcher-update/SKILL.md: sha256:2f7a416b4717ae2b248cdf4a0fca4e486acbcebefb27935a96ed241b0fe728d8
     .agents/skills/keyswitcher-update/references/signing-cert.md: sha256:ccc28a89411fe8de367c1b57cf3f1fc392ae41c0367d58855b1856231cc89e2d
     .agents/skills/keyswitcher-update/references/threat-model.md: sha256:898a0a5c906ab485ef170c19ce6f2c7284d4cd16ff4319283e4d32024ba5a9ca
@@ -1547,6 +1558,9 @@ dependencies:
     .claude/skills/analyze-friction/scripts/miner.ts: sha256:7f1b7bb4ba30599395040d26c78fef89cb2f250bdb4473b5f44dff97dd08abcc
     .claude/skills/analyze-permissions/SKILL.md: sha256:b6babc9329cfca9e3646371086f5b47d3482a0387b0f24178fb664eb882321ef
     .claude/skills/analyze-permissions/scripts/analyze-permissions.py: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
+    .claude/skills/artifact/SKILL.md: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+    .claude/skills/artifact/agents/artifact-publisher.json: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
+    .claude/skills/artifact/scripts/artifact-publish: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
     .claude/skills/brew-cask/SKILL.md: sha256:f13b235e1643b9b12397bce9320893b6b82565c4a9479d6cb4704927fc5804a2
     .claude/skills/cc-fork-recover/SKILL.md: sha256:b3c0c9055e3ae2b3ac3b3c9110717046a08b03a443ab051a058241a2ce3d9aa1
     .claude/skills/cc-fork-recover/scripts/cc-fork-recover: sha256:2c386c7bf857a8162c90bc23390dfc51c4c2fd3d9ab21b90b3497e062a40ae8f
@@ -1629,7 +1643,7 @@ dependencies:
     .claude/skills/homelab-add-service/scripts/compose-to-homelab.ts: sha256:8b8e89f9db9c02496cbf8576101fa85ccd65952b2ab2438d2e34549285fe8233
     .claude/skills/homelab-add-service/scripts/convert.ts: sha256:92617eaa4641a990319d71cc7394f7417da85e2e59e2a2c5472ff614992f1ba0
     .claude/skills/homelab-deploy/SKILL.md: sha256:490134dadf01bf74b95ca3b3a3ad565e7b94b1fd21543c4df1a678807540220f
-    .claude/skills/keybind/SKILL.md: sha256:af46121f4b01f44fe95cfcc5b809e159b4c7a154f068421f2be8e00c0179db70
+    .claude/skills/keybind/SKILL.md: sha256:e24f11028f81e4309c02b512ff3a263701a5e1b26cbd79d404bf4556c2ee7d94
     .claude/skills/keyswitcher-update/SKILL.md: sha256:2f7a416b4717ae2b248cdf4a0fca4e486acbcebefb27935a96ed241b0fe728d8
     .claude/skills/keyswitcher-update/references/signing-cert.md: sha256:ccc28a89411fe8de367c1b57cf3f1fc392ae41c0367d58855b1856231cc89e2d
     .claude/skills/keyswitcher-update/references/threat-model.md: sha256:898a0a5c906ab485ef170c19ce6f2c7284d4cd16ff4319283e4d32024ba5a9ca
@@ -1684,10 +1698,7 @@ dependencies:
     .claude/skills/wt-workflow/SKILL.md: sha256:dd84e2e58982cb8d20fffa9ce7796d58aec2196267b42a6e7c6b6c4de0453431
     .claude/skills/youtube-summary/SKILL.md: sha256:2e00a437a8b861dac47d4461f1fb712b9822b5261931ff60c738aa4e50834e52
     .claude/skills/youtube-summary/scripts/yt-transcript: sha256:adadfdfc852ff5abb056507c883f467358ff739e7a652cdf756a5d73d0bd2f98
-  content_hash: sha256:6683ffa2e29df4c6e01f843d3938b4e86b96952ce0a1c7133fb2842d8d9b78a5
-  constraint: ^1.0.0
-  resolved_tag: v1.20.0+88231be
-  resolved_at: '2026-11-26T07:55:44+00:00'
+  content_hash: sha256:6e38194d64bca0a69ce72d144e554271c8c827097a3a0266ed81f78539a48802
   declared_license: UNLICENSED
 deployments:
 - kind: project-relative
@@ -1816,6 +1827,42 @@ deployments:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
   content_hash: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
+- kind: project-relative
+  target: claude
+  value: .claude/skills/artifact
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/artifact/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+- kind: project-relative
+  target: claude
+  value: .claude/skills/artifact/agents/artifact-publisher.json
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
+- kind: project-relative
+  target: claude
+  value: .claude/skills/artifact/scripts/artifact-publish
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
 - kind: project-relative
   target: claude
   value: .claude/skills/brew-cask
@@ -3354,7 +3401,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:af46121f4b01f44fe95cfcc5b809e159b4c7a154f068421f2be8e00c0179db70
+  content_hash: sha256:e24f11028f81e4309c02b512ff3a263701a5e1b26cbd79d404bf4556c2ee7d94
 - kind: project-relative
   target: claude
   value: .claude/skills/keyswitcher-update
@@ -5859,6 +5906,42 @@ deployments:
   content_hash: sha256:d06a735cf0431a0d18dd26c45399400c61a809a31bbd97dd051168353c1fa426
 - kind: project-relative
   target: codex
+  value: .agents/skills/artifact
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/artifact/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:bda25c6b0b872e8966978f57fd6843bab2a9c6251b6aba27412083bbc2b39932
+- kind: project-relative
+  target: codex
+  value: .agents/skills/artifact/agents/artifact-publisher.json
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:42f8b7a030736c0ace737019e7a6c96ef78931125b630f72b3b0d5fa58d758d3
+- kind: project-relative
+  target: codex
+  value: .agents/skills/artifact/scripts/artifact-publish
+  runtime: null
+  scope: project
+  owners:
+  - yoshintame/agent-harness
+  active_owner: yoshintame/agent-harness
+  content_hash: sha256:1895bf96f0d858a9efecb8a8aab52e7841650942092db8ac8ff5f330fb2cd44a
+- kind: project-relative
+  target: codex
   value: .agents/skills/brew-cask
   runtime: null
   scope: project
@@ -7395,7 +7478,7 @@ deployments:
   owners:
   - yoshintame/agent-harness
   active_owner: yoshintame/agent-harness
-  content_hash: sha256:af46121f4b01f44fe95cfcc5b809e159b4c7a154f068421f2be8e00c0179db70
+  content_hash: sha256:e24f11028f81e4309c02b512ff3a263701a5e1b26cbd79d404bf4556c2ee7d94
 - kind: project-relative
   target: codex
   value: .agents/skills/keyswitcher-update
