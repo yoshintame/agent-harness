@@ -35,3 +35,6 @@ several skills, hooks or services.
 subagent prompt, `/code-review` and `/security-review` recipes) for reference and
 diffing. It is gitignored because the texts are Anthropic's proprietary content:
 never commit them. Re-run the script after a Claude Code update.
+`scripts/build-orchestrator.ts` builds the gitignored `claude/agents/orchestrator.md`
+from the vendored system prompt and `claude/orchestrator/rules.md`; re-run both
+after a Claude Code update or a rules change.

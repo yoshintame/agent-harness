@@ -15,3 +15,4 @@ build/
 /claude/settings.backup-*.json
 
 /vendor/
+/claude/agents/orchestrator.md
