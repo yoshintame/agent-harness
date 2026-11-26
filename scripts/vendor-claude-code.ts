@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { defineCommand, runMain } from 'citty'
 
@@ -12,6 +12,10 @@ const securityTail = '\nReview the complete diff above.'
 const builtinSkills = ['artifact-design', 'artifact-capabilities', 'artifact-diagramming']
 const quickstartDesignMarker = '## Page contract'
 const quickstartDesignTail = /\n+\[Design systems [^\n]*\]\s*$/
+const orchestratorMarker = '# Правила оркестратора'
+const captureSettings = '{"agent":""}'
+const capturePrompt = 'Reply OK. Do not call tools.'
+const systemPromptKeys = ['system-prompt', 'system-prompt:non-interactive']
 
 interface Found {
   version: string | undefined
@@ -161,7 +165,9 @@ function scanMain(path: string, lines: string[], collector: Collector): void {
     if (record?.type !== 'api-request-shape') continue
     const blocks = record.shape?.system ?? []
     if (blocks.length < 2) continue
-    const text = stripTotalTokens(blocks.slice(1).map((block) => block.text ?? '').join('\n\n')).trimEnd() + '\n'
+    const joined = blocks.slice(1).map((block) => block.text ?? '').join('\n\n')
+    if (joined.includes(orchestratorMarker)) continue
+    const text = stripTotalTokens(joined).trimEnd() + '\n'
     const tools = new Set((record.shape?.tools ?? []).map((tool) => tool.name))
     const found = { version: record.version, path, text }
     if (tools.has('Agent') && tools.has('Skill')) interactive = found
@@ -284,6 +290,40 @@ async function scan(projects: string, collector: Collector, skills: NewestCollec
   return files.length
 }
 
+function mangleProjectPath(path: string): string {
+  return path.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+function newestTranscript(dir: string): string | undefined {
+  if (!existsSync(dir)) return undefined
+  return readdirSync(dir)
+    .filter((name) => name.endsWith('.jsonl'))
+    .map((name) => ({ path: join(dir, name), mtime: statSync(join(dir, name)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)[0]?.path
+}
+
+function captureSession(): string {
+  const projects = join(homedir(), '.claude', 'projects')
+  const dir = mkdtempSync(join(tmpdir(), 'vendor-claude-code-'))
+  try {
+    const cwd = realpathSync(dir)
+    const result = Bun.spawnSync(['claude', '-p', '--model', 'haiku', '--settings', captureSettings, capturePrompt], {
+      cwd,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (result.exitCode !== 0) throw new Error(`capture session failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`)
+    const candidates = [...new Set([cwd, dir])].map((path) => join(projects, mangleProjectPath(path)))
+    for (const candidate of candidates) {
+      const transcript = newestTranscript(candidate)
+      if (transcript) return transcript
+    }
+    throw new Error(`capture session left no transcript in ${candidates.join(' or ')}`)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 function write(relPath: string, text: string): void {
   const target = join(outDir, relPath)
   mkdirSync(dirname(target), { recursive: true })
@@ -302,6 +342,11 @@ const main = defineCommand({
       description: 'Claude Code projects directory with session transcripts',
       default: join(homedir(), '.claude', 'projects'),
     },
+    capture: {
+      type: 'boolean',
+      description: 'Run a headless session without the custom agent to capture the current main-session system prompt',
+      default: false,
+    },
   },
   async run({ args }) {
     const projects = resolve(args.projects)
@@ -312,6 +357,19 @@ const main = defineCommand({
     const skills = new NewestCollector()
     const count = await scan(projects, collector, skills)
     console.log(`scanned ${count} transcripts in ${projects} for Claude Code ${version ?? '(unknown)'}`)
+
+    if (args.capture || !systemPromptKeys.some((key) => collector.has(key))) {
+      const transcript = captureSession()
+      console.log(`ran a capture session: ${transcript}`)
+      const captured = new Collector(version)
+      scanMain(transcript, readFileSync(transcript, 'utf8').split('\n'), captured)
+      if (!systemPromptKeys.some((key) => captured.slots.has(key))) throw new Error(`capture session transcript has no main-session system prompt: ${transcript}`)
+      for (const key of systemPromptKeys) {
+        const slot = captured.slots.get(key)
+        if (slot) collector.slots.set(key, slot)
+        else collector.slots.delete(key)
+      }
+    }
 
     const warnings: string[] = []
     const missing: string[] = []
